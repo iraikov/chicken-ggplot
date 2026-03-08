@@ -1,0 +1,24 @@
+
+((synopsis "Grammar of graphics.")
+ (license "GPL-3")
+ (category graphics)
+ (dependencies srfi-1 datatype matchable statistics plot)
+ (author "Ivan Raikov")
+ (components (extension gg-primitives
+                        (csc-options "-O0" "-d2"))
+             (extension gg-scales
+                        (csc-options "-O0" "-d2"))
+             (extension gg-guides
+                        (csc-options "-O0" "-d2"))
+             (extension gg-aes
+                        (csc-options "-O0" "-d2"))
+             (extension gg-data
+                        (csc-options "-O0" "-d2"))
+             (extension gg-geom
+                        (csc-options "-O0" "-d2"))
+             (extension gg-layout
+                        (csc-options "-O0" "-d2"))
+             (extension gg-plot
+                        (csc-options "-O0" "-d2"))
+             )
+ )
