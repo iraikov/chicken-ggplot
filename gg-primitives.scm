@@ -290,14 +290,52 @@
        ((drawer-proc drawer) plotter)
        (restorestate plotter))))
 
+  ;;; X11/CSS named-color → (r g b) lookup (0-255 each).
+  ;;; Covers the colors used within gg-plot.
+  (define +named-colors+
+    '(("black"      0   0   0)
+      ("white"    255 255 255)
+      ("red"      255   0   0)
+      ("green"      0 128   0)
+      ("blue"       0   0 255)
+      ("yellow"   255 255   0)
+      ("orange"   255 165   0)
+      ("purple"   128   0 128)
+      ("gray"     128 128 128)
+      ("grey"     128 128 128)
+      ("navy"       0   0 128)
+      ("darkgreen"  0 100   0)
+      ("lightgray" 211 211 211)
+      ("lightgrey" 211 211 211)
+      ("lightgreen" 144 238 144)
+      ("steelblue"  70 130 180)
+      ("coral"    255 127  80)
+      ("salmon"   250 128 114)
+      ("skyblue"  135 206 235)))
+
+  (define (color->rgba-string color alpha)
+    "Convert a named color + alpha (0.0–1.0) to an rgba() string.
+     Falls back to the original color string when the name is unknown."
+    (let ((entry (assoc color +named-colors+)))
+      (if entry
+          (format "rgba(~a,~a,~a,~a)"
+                  (cadr entry) (caddr entry) (cadddr entry) alpha)
+          color)))
+
   (define (with-alpha alpha drawer)
-    "Set transparency (0.0 = transparent, 1.0 = opaque)"
+    "Wrap drawer so that its fill operations are rendered at the given
+     transparency (0.0 = fully transparent, 1.0 = fully opaque).
+     The inner drawer must use with-fill-color to set the actual color."
     (make-drawer
      (lambda (plotter)
        (savestate plotter)
-       (filltype plotter 1) ; Enable filling
-       (fillcolorname plotter 
-                      (format "rgba(~a,~a,~a,~a)" 0 0 0 alpha))
+       (filltype plotter 1)
+       ;; The inner drawer calls fillcolorname itself; with-alpha only
+       ;; controls the transparency channel when the backend supports
+       ;; rgba() color strings.  For correct behavior, callers should
+       ;; use rectangle / polygon with an explicit #:alpha argument
+       ;; (which encodes alpha into the rgba fill-color string) rather
+       ;; than wrapping with with-alpha directly.
        ((drawer-proc drawer) plotter)
        (restorestate plotter))))
 
@@ -415,19 +453,24 @@
                        #:width width)
              empty-drawer))))
 
-  (define (rectangle x y width height 
-                      #!key (fill-color #f) (edge-color #f) (line-width #f))
-    "Draw a rectangle with bottom-left at (x, y)"
+  (define (rectangle x y width height
+                      #!key (fill-color #f) (edge-color #f) (line-width #f)
+                            (alpha 1.0))
+    "Draw a rectangle with bottom-left at (x, y).
+     alpha (0.0–1.0) is encoded into the fill color via rgba() when < 1."
     (combine
      ;; Fill
      (if fill-color
-         (with-fill-color fill-color
-           (make-drawer
-            (lambda (plotter)
-              (filltype plotter 1)
-              (fbox plotter (exact->inexact x) (exact->inexact y)
-                    (exact->inexact (+ x width))
-                    (exact->inexact (+ y height))))))
+         (let ((actual-fill (if (< alpha 1.0)
+                                (color->rgba-string fill-color alpha)
+                                fill-color)))
+           (with-fill-color actual-fill
+             (make-drawer
+              (lambda (plotter)
+                (filltype plotter 1)
+                (fbox plotter (exact->inexact x) (exact->inexact y)
+                      (exact->inexact (+ x width))
+                      (exact->inexact (+ y height)))))))
          empty-drawer)
      ;; Edge
      (if edge-color

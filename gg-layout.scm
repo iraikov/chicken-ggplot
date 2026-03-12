@@ -571,7 +571,7 @@
                  (py2 (if y-scale (scale-map y-scale ymax) ymax)))
              (rectangle px1 py1 (- px2 px1) (- py2 py1)
                         #:fill-color fill #:edge-color color
-                        #:edge-width lw #:alpha alpha)))))
+                        #:line-width lw #:alpha alpha)))))
       
       (('annotation 'segment params ...)
        (let ((x (assq-ref params 'x))

@@ -408,17 +408,24 @@
                   values))
        
        ((scale-map self value)
-        ;; Map value to center of its band
-        (let* ((idx (list-index (lambda (x) (equal? x value)) domain-list))
-               (n (length domain-list)))
-          (if (not idx)
-              (car range-pair)
-              (let* ((r-min (car range-pair))
-                     (r-max (cdr range-pair))
-                     (total-range (- r-max r-min))
-                     (step (/ total-range n))
-                     (band-width (* step (- 1 padding-val))))
-                (+ r-min (* idx step) (/ step 2))))))
+        ;; Map value to center of its band.
+        ;; Category values are looked up by equality; numeric values are
+        ;; treated as 0-based fractional band indices so that annotation
+        ;; coordinates like -0.5 (just left of band 0) and 3.5 (just right
+        ;; of band 3) work as expected.
+        (let* ((n (length domain-list))
+               (r-min (car range-pair))
+               (r-max (cdr range-pair))
+               (total-range (- r-max r-min))
+               (step (/ total-range n)))
+          (if (number? value)
+              ;; Fractional 0-based index → interpolate between bands
+              (+ r-min (* value step) (/ step 2))
+              ;; Category string/symbol → look up position by domain index
+              (let ((idx (list-index (lambda (x) (equal? x value)) domain-list)))
+                (if idx
+                    (+ r-min (* idx step) (/ step 2))
+                    (car range-pair))))))
        
        ((scale-inverse self value)
         ;; Find which band the value falls into

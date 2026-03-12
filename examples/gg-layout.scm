@@ -354,7 +354,7 @@
 
 (define boxplot-comparison-example
   (let* ((;; Simulate drug dose-response data
-          doses '("0" "1" "5" "10"))
+          doses '("10" "5" "1" "0"))
          (treatments '("placebo" "drug-A" "drug-B"))
          
           ;; Generate data for each dose × treatment combination
@@ -397,8 +397,8 @@
                             #:color "black"
                             #:linetype 'solid
                             #:line-width 1.5)
-            (layer-annotate-text "Baseline" -0.6 1.05
-                                 #:size 9 #:hjust 0)
+            (layer-annotate-text "Baseline" -0.7 1.15
+                                 #:size 11 #:hjust 0)
             
             ;; Therapeutic window
             (layer-annotate-rect -0.5 1.3 3.5 1.8
@@ -406,19 +406,19 @@
                                  #:alpha 0.15
                                  #:color "darkgreen"
                                  #:line-width 1)
-            (layer-annotate-text "Therapeutic\nwindow" 3.6 1.55
+            (layer-annotate-text "Therapeutic window" 3.2 1.55
                                  #:color "darkgreen"
-                                 #:size 8
-                                 #:hjust 0)
-            
+                                 #:size 11
+                                 #:hjust 1)   ; right-align so text extends leftward into panel
+
             ;; Arrow showing dose-response
             (layer-annotate-arrow 1.5 1.2 2.0 1.7
                                   #:color "blue"
                                   #:arrow-length 12)
-            (layer-annotate-text "Dose-dependent\nresponse" 1.3 1.0
+            (layer-annotate-text "Dose-dependent response" 1.5 0.75
                                  #:color "blue"
-                                 #:size 8
-                                 #:hjust 1)
+                                 #:size 11
+                                 #:hjust 0.5) ; centered below the arrow tail, below baseline
             
             (scale-fill-manual #:values '(("placebo" . "lightgray")
                                           ("drug-A" . "steelblue")
