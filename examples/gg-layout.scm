@@ -250,7 +250,7 @@
                              #:color "red"
                              #:linetype 'dashed
                              #:line-width 1.5)
-            (layer-annotate-text "Perfect\ncalibration" 9 9.3
+            (layer-annotate-text "Perfect calibration" 9 9.3
                                  #:color "red" #:size 9 #:hjust 1)
             
             ;; Fitted regression line
@@ -259,7 +259,7 @@
                              #:line-width 2.5)
             
             ;; Model statistics annotation
-            (layer-annotate-text "R² = 0.847\nRMSE = 0.52" 9.5 1.5
+            (layer-annotate-text "R^2 = 0.847 RMSE = 0.52" 7.5 1.5
                                  #:hjust 1 #:vjust 0
                                  #:size 10 #:color "black")
             
@@ -267,7 +267,7 @@
             (layer-annotate-arrow 5 5 5.5 5.46
                                   #:color "darkgreen"
                                   #:arrow-length 10)
-            (layer-annotate-text "Slight\nover-prediction" 5.7 5.5
+            (layer-annotate-text "Slight over-prediction" 5.7 5.5
                                  #:color "darkgreen" #:size 8)
             
             (scale-x-continuous #:label "Predicted Value" #:limits '(0 10))
@@ -476,13 +476,13 @@
                                     #:color "black"
                                     #:line-width 1
                                     #:arrow? #t)
-            (layer-annotate-text "Clear separation\nalong PC1" 0 -1.5
+            (layer-annotate-text "Clear separation along PC1" 0 -1.5
                                  #:size 9 #:hjust 0.5)
             
             ;; Variance explained annotation
-            (layer-annotate-text "PC1: 68% variance\nPC2: 18% variance"
-                                 -2.8 1.2
-                                 #:size 9
+            (layer-annotate-text "PC1: 68% variance  PC2: 18% variance"
+                                 -2.2 1.1
+                                 #:size 11
                                  #:hjust 0
                                  #:vjust 1)
             
