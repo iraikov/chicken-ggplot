@@ -637,16 +637,16 @@
      ((explicit-breaks self) explicit-breaks)))
   
 
-  (define (compute-pretty-breaks min max n)
+  (define (compute-pretty-breaks min-val max-val n)
     "Compute aesthetically pleasing break points"
   
-    (if (= min max)
-        (list min)
-        (let* ((range (- max min))
+    (if (= min-val max-val)
+        (list min-val)
+        (let* ((range (- max-val min-val))
                (rough-step (/ range (max 1 (- n 1))))
                (step (round-to-nice rough-step))
-               (start (* step (floor (/ min step))))
-               (end (* step (ceiling (/ max step)))))
+               (start (* step (floor (/ min-val step))))
+               (end (* step (ceiling (/ max-val step)))))
           
           (let loop ((x start) (acc '()))
             (if (> x (+ end (* 0.5 step)))

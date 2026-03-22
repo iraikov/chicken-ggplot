@@ -39,10 +39,44 @@
           (chicken format)
           (chicken sort)
           srfi-1
-          gg-primitives
+          gg-primitives-vge
           gg-scales
           gg-data
           gg-aes)
+
+  ;;; ========================================================================
+  ;;; Local bridge: old keyword-arg primitive API -> new VGE drawer combinators
+  ;;; ========================================================================
+
+  (define (circle cx cy r #!key (fill-color "black") (edge-color "black"))
+    (with-pen-color edge-color
+      (with-fill-color fill-color
+        (filled-circle-drawer cx cy r))))
+
+  (define (polyline pts #!key (color "black") (width 1) (style 'solid))
+    (with-pen-color color
+      (with-line-width width
+        (polyline-drawer pts))))
+
+  (define (polygon pts #!key (fill-color "lightgray") (edge-color "none"))
+    (with-pen-color edge-color
+      (with-fill-color fill-color
+        (filled-polygon-drawer pts))))
+
+  (define (rectangle x y w h #!key (fill-color "lightgray") (edge-color "black"))
+    (with-pen-color edge-color
+      (with-fill-color fill-color
+        (filled-rect-drawer x y w h))))
+
+  (define (text x y str #!key (color "black") (size 10.0))
+    (with-pen-color color
+      (with-font "sans" size 'normal 'normal
+        (text-drawer x y str))))
+
+  (define (line x1 y1 x2 y2 #!key (color "black") (width 1) (style 'solid))
+    (with-pen-color color
+      (with-line-width width
+        (line-drawer x1 y1 x2 y2))))
 
   ;;; ========================================================================
   ;;; Geometry Helpers

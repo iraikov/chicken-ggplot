@@ -125,8 +125,10 @@
           matchable
           yasos
           yasos-collections
-          plot
-          gg-primitives
+          gg-vge
+          gg-primitives-vge
+          gg-backend
+          gg-backend-cairo
           gg-scales
           gg-data
           gg-aes
@@ -1097,59 +1099,88 @@
   ;;; Plot Rendering Pipeline
   ;;; ========================================================================
 
-  (define (render-plot plot-spec plotter-ctx)
-    "Render plot specification to plotter context
-   
-     Pipeline:
-     1. Normalize specification (defaults, validation)
-     2. Train scales from all layers
-     3. Compute facet panels
-     4. Render each panel (background, geometries, axes, guides)
-     5. Render global elements (title, legends)
-   
+  ;;; Linetype helper
+  ;;; Wraps a drawer with a dash pattern matching the given linetype symbol.
+  (define (with-linetype lt drawer)
+    (case lt
+      ((dashed) (with-dash '(10.0 5.0) 0.0 drawer))
+      ((dotted)  (with-dash '(2.0 5.0)  0.0 drawer))
+      (else drawer)))  ;; solid / unknown: no modification
+
+  ;;; Top-level rendering
+
+  (define (render-plot plot-spec backend)
+    "Render a plot specification to a graphics backend.
+
+     Pipeline (per the VGE architecture):
+       1. Normalize specification (defaults, validation)
+       2. Train scales from all layers
+       3. compile-plot -> builds a single drawer tree (pure, no I/O)
+       4. render-drawer -> emits gfx-insn values into a fresh VGE
+       5. vge-render! -> interprets the VGE against the backend (I/O)
+
      Arguments:
-       plot-spec:    Plot specification created by ggplot
-       plotter-ctx:  Plotter context from make-png-plotter, make-svg-plotter, etc.
-   
-     Returns: void (side effect: renders plot to output)
-   
+       plot-spec  -- plot specification created by ggplot
+       backend    -- graphics backend (make-cairo-png-backend, etc.)
+
      Example:
-       (let ((ctx (make-png-plotter \"output.png\" 800 600)))
-         (render-plot my-plot ctx)
-         (delete-plotter (plotter-context-plotter ctx)))"
-  
-    ;; Extract plotter and dimensions from context
-    (let ((plotter (plotter-context-plotter plotter-ctx))
-          (width (plotter-context-width plotter-ctx))
-          (height (plotter-context-height plotter-ctx)))
-      
-      ;; Phase 1: Normalize
-      (let* ((normalized-spec (normalize-plot-spec plot-spec))
-             
-             ;; Phase 2: Train scales
-             (trained-scales (train-plot-scales normalized-spec))
-             
-             ;; Phase 3: Compute facets
-             (panels (compute-facet-panels normalized-spec trained-scales width height))
-             
-             ;; Get theme and labels
-             (theme (plot-spec-theme normalized-spec))
-             (labels (plot-spec-labels normalized-spec)))
-        
-        ;; Initialize plotter
-        (openpl plotter)
-        (fspace plotter 0 0 (exact->inexact width) (exact->inexact height))
-        
-        ;; Phase 4: Render panels
-        (for-each (lambda (panel)
-                    (render-panel panel plotter theme))
-                  panels)
-        
-        ;; Phase 5: Render global elements
-        (render-global-elements normalized-spec trained-scales plotter 
-                                width height theme labels)
-        
-        (closepl plotter))))
+       (render-plot my-plot (make-cairo-png-backend \"out.png\" 800 600))"
+
+    (let* ((normalized  (normalize-plot-spec plot-spec))
+           (scales      (train-plot-scales normalized))
+           (width       (backend/get-width  backend))
+           (height      (backend/get-height backend))
+           (top-drawer  (compile-plot normalized scales width height))
+           (vge         (make-vge)))
+      (render-drawer top-drawer vge)
+      (vge-render! vge backend)))
+
+  ;;; Build the complete drawer tree for a plot (pure — no I/O).
+  (define (compile-plot spec scales width height)
+    (let* ((theme   (plot-spec-theme  spec))
+           (labels  (plot-spec-labels spec))
+           (panels  (compute-facet-panels spec scales width height)))
+      (apply combine
+        (append
+          ;; One drawer per panel
+          (map (lambda (panel)
+                 (compile-panel panel theme))
+               panels)
+          ;; Global elements: title, subtitle, legends
+          (list (compile-global-elements-drawer
+                   spec scales width height theme labels))))))
+
+  ;;; Compile a single panel into a combined drawer.
+  (define (compile-panel panel theme)
+    (let* ((spec   (assq-ref panel 'spec))
+           (scales (assq-ref panel 'scales))
+           (bounds (assq-ref panel 'bounds))
+           (layers (plot-spec-layers spec))
+           (scales-with-ranges (with-scale-ranges scales bounds)))
+      (combine-group
+        ;; Panel background + grid
+        (make-panel-background-drawer bounds theme)
+        ;; Data layers (non-annotation)
+        (apply combine
+          (map (lambda (layer)
+                 (if (annotation-layer? layer)
+                     empty-drawer
+                     (compile-layer layer spec scales-with-ranges)))
+               layers))
+        ;; Annotation layers
+        (apply combine
+          (map (lambda (layer)
+                 (if (annotation-layer? layer)
+                     (compile-annotation-layer-drawer layer scales-with-ranges panel)
+                     empty-drawer))
+               layers))
+        ;; Axes
+        (compile-panel-axes-drawer scales-with-ranges theme bounds spec)
+        ;; Facet strip label (when present)
+        (let ((facet-label (assq-ref panel 'facet-label)))
+          (if facet-label
+              (compile-panel-strip-drawer bounds facet-label)
+              empty-drawer)))))
 
 
   ;;; ------------------------------------------------------------------------
@@ -1633,7 +1664,7 @@
             (let* ((val   (car vals))
                    (col   (remainder idx ncols))
                    (row   (quotient  idx ncols))
-                   ;; x increases left→right
+                   ;; x increases left->right
                    (x-min (exact->inexact (+ margin-left (* col (+ pw h-gap)))))
                    (x-max (exact->inexact (+ x-min pw)))
                    ;; Row 0 is the topmost row; y increases upward in libplot
@@ -1715,410 +1746,367 @@
                   scale-entry))))
            scales)))
   
-  (define (render-panel-strip plotter bounds facet-label)
-    "Render the facet strip label above a panel."
+  (define (compile-panel-strip-drawer bounds facet-label)
+    "Return a drawer for the facet strip label above a panel."
     (let* ((x-min       (first  bounds))
            (x-max       (third  bounds))
            (y-max       (fourth bounds))
            (strip-height 20)
            (sy-min      (exact->inexact y-max))
-           (sy-max      (exact->inexact (+ y-max strip-height)))
            (x-center    (exact->inexact (/ (+ x-min x-max) 2)))
-           (y-center    (exact->inexact (/ (+ sy-min sy-max) 2))))
-      ;; Background rectangle
-      (render-drawer
-       (rectangle x-min sy-min (- x-max x-min) strip-height
-                  #:fill-color "gray90"
-                  #:edge-color "gray60")
-       plotter)
-      ;; Centred label text
-      (render-drawer
-       (text x-center y-center facet-label #:size 9.0 #:color "black")
-       plotter)))
+           (y-center    (exact->inexact (+ sy-min (/ strip-height 2)))))
+      (combine
+        ;; Background rectangle
+        (with-pen-color "gray60"
+          (with-fill-color "gray90"
+            (filled-rect-drawer x-min sy-min (- x-max x-min) (exact->inexact strip-height))))
+        ;; Centred label
+        (with-pen-color "black"
+          (with-font "sans" 9.0 'normal 'normal
+            (text-drawer x-center y-center facet-label
+                         #:halign halign/center
+                         #:valign valign/center))))))
 
+  ;; render-panel is superseded by compile-panel (called from compile-plot).
+  ;; Kept as a no-op shim so any external call-sites produce a clear error
+  ;; rather than an unbound-variable panic.
   (define (render-panel panel plotter theme)
-    "Render a single panel"
+    (error "render-panel: use compile-panel / render-plot instead"))
 
-    (let* ((spec (assq-ref panel 'spec))
-           (scales (assq-ref panel 'scales))
-           (bounds (assq-ref panel 'bounds))
-           (layers (plot-spec-layers spec)))
-      
-      ;; Set scale ranges based on panel bounds
-      (let ((scales-with-ranges (with-scale-ranges scales bounds)))
+  (define (make-panel-background-drawer bounds theme)
+    "Return a drawer for the panel background, grid, and border."
+    (let* ((panel-props       (assq-ref theme 'panel))
+           (background-color  (assq-ref panel-props 'background))
+           (grid-major-color  (assq-ref panel-props 'grid-major))
+           (border-color      (assq-ref panel-props 'border))
+           (x-min  (exact->inexact (first  bounds)))
+           (y-min  (exact->inexact (second bounds)))
+           (x-max  (exact->inexact (third  bounds)))
+           (y-max  (exact->inexact (fourth bounds)))
+           (w      (- x-max x-min))
+           (h      (- y-max y-min)))
+      (combine-group
+        ;; Background fill
+        (if background-color
+            (with-pen-color color-transparent
+              (with-fill-color background-color
+                (filled-rect-drawer x-min y-min w h)))
+            empty-drawer)
+        ;; Major grid lines
+        (if grid-major-color
+            (with-pen-color grid-major-color
+              (with-line-width 0.5
+                (apply combine
+                  (append
+                    ;; 5 horizontal grid lines
+                    (let ((y-step (/ h 6)))
+                      (map (lambda (i)
+                             (h-line-drawer x-min x-max
+                                            (+ y-min (* i y-step))))
+                           '(1 2 3 4 5)))
+                    ;; 5 vertical grid lines
+                    (let ((x-step (/ w 6)))
+                      (map (lambda (i)
+                             (v-line-drawer (+ x-min (* i x-step))
+                                            y-min y-max))
+                           '(1 2 3 4 5)))))))
+            empty-drawer)
+        ;; Border
+        (if border-color
+            (with-pen-color border-color
+              (with-line-width 1.0
+                (combine
+                  (line-drawer x-min y-min x-max y-min)  ; bottom
+                  (line-drawer x-max y-min x-max y-max)  ; right
+                  (line-drawer x-max y-max x-min y-max)  ; top
+                  (line-drawer x-min y-max x-min y-min)))) ; left
+            empty-drawer))))
 
-        ;; Set up panel coordinate system
-        (savestate plotter)
-      
-        ;; Apply panel bounds
-        (let ((x-min (first bounds))
-              (y-min (second bounds))
-              (x-max (third bounds))
-              (y-max (fourth bounds)))
-          
-          ;; Render panel background
-          (render-panel-background plotter theme bounds)
-        
-          ;; Render each layer
-          (for-each
-           (lambda (layer)
-             (unless (annotation-layer? layer)
-               (render-layer layer spec scales-with-ranges plotter)))
-           layers)
+  (define (compile-layer layer spec scales)
+    "Compile a single geometry layer into a drawer."
+    (let* ((geom-name   (layer-geom layer))
+           (layer-data  (or (layer-data layer) (plot-spec-data spec)))
+           (layer-aes   (aes-merge (plot-spec-default-aes spec) (layer-aes layer)))
+           (params      (layer-params layer))
+           (stat        (layer-stat layer)))
+      ;; Apply statistical transformation when present
+      (let* ((processed-data
+              (if stat
+                  (case stat
+                    ((stat-bin)     (stat-bin     layer-data layer-aes params))
+                    ((stat-density) (stat-density layer-data layer-aes params))
+                    ((stat-boxplot) (stat-boxplot layer-data layer-aes params))
+                    ((stat-violin)  (stat-violin  layer-data layer-aes params))
+                    ((stat-summary) (stat-summary layer-data layer-aes params))
+                    (else layer-data))
+                  layer-data))
+             (processed-aes
+              (if stat
+                  (case stat
+                    ((stat-bin)
+                     (aes #:x 'x #:width 'width #:y 'y))
+                    ((stat-density)
+                     (aes #:x 'x #:y 'y))
+                    ((stat-boxplot)
+                     (aes #:x 'x #:ymin 'ymin #:lower 'lower
+                          #:middle 'middle #:upper 'upper #:ymax 'ymax
+                          #:outliers 'outliers))
+                    ((stat-violin)
+                     (aes #:x 'group #:y 'y-values))
+                    ((stat-summary)
+                     (aes #:x 'x #:y 'y #:ymin 'ymin #:ymax 'ymax))
+                    (else layer-aes))
+                  layer-aes)))
+        ;; Dispatch to geom compiler — each returns a drawer
+        (case geom-name
+          ((point)     (compile-geom-point     layer-data  layer-aes  scales params))
+          ((line)      (compile-geom-line      layer-data  layer-aes  scales params))
+          ((bar)       (compile-geom-bar       layer-data  layer-aes  scales params))
+          ((area)      (compile-geom-area      layer-data  layer-aes  scales params))
+          ((rect)      (compile-geom-rect      layer-data  layer-aes  scales params))
+          ((text)      (compile-geom-text      layer-data  layer-aes  scales params))
+          ((segment)   (compile-geom-segment   layer-data  layer-aes  scales params))
+          ((eventplot) (compile-geom-eventplot layer-data  layer-aes  scales params))
+          ((hline)     (compile-geom-hline     layer-data  layer-aes  scales params))
+          ((vline)     (compile-geom-vline     layer-data  layer-aes  scales params))
+          ((histogram) (compile-geom-histogram processed-data processed-aes scales params))
+          ((density)   (compile-geom-density   processed-data processed-aes scales params))
+          ((boxplot)   (compile-geom-boxplot   processed-data processed-aes scales params))
+          ((violin)    (compile-geom-violin    processed-data processed-aes scales params))
+          ((errorbar)  (compile-geom-errorbar  processed-data processed-aes scales params))
+          ((pointrange)(compile-geom-pointrange processed-data processed-aes scales params))
+          ((linerange) (compile-geom-linerange  processed-data processed-aes scales params))
+          ((crossbar)  (compile-geom-crossbar   processed-data processed-aes scales params))
+          ((col)       (compile-geom-bar        processed-data processed-aes scales params))
+          (else (error "compile-layer: unknown geometry" geom-name))))))
 
-          ;; Render annotation layers
-          (for-each
-           (lambda (layer)
-             (when (annotation-layer? layer)
-               (render-annotation-layer layer scales-with-ranges panel plotter)))
-           layers)
-          
-          ;; Render axes
-          (render-panel-axes scales-with-ranges plotter theme bounds spec)
-
-          ;; Render facet strip label above panel (when present)
-          (let ((facet-label (assq-ref panel 'facet-label)))
-            (when facet-label
-              (render-panel-strip plotter bounds facet-label)))))
-
-      (restorestate plotter)))
-
-  (define (render-panel-background plotter theme bounds)
-    "Render panel background and grid"
-    
-    (let* ((panel-props (assq-ref theme 'panel))
-           (background-color (assq-ref panel-props 'background))
-           (grid-major-color (assq-ref panel-props 'grid-major))
-           (grid-minor-color (assq-ref panel-props 'grid-minor))
-           (border-color (assq-ref panel-props 'border))
-           (x-min (first bounds))
-           (y-min (second bounds))
-           (x-max (third bounds))
-           (y-max (fourth bounds)))
-      
-      ;; Save state before any background rendering
-      (savestate plotter)
-      
-      ;; Background fill
-      (when background-color
-        (fillcolorname plotter background-color)
-        (filltype plotter 1)
-        (fbox plotter x-min y-min x-max y-max))
-      
-      ;; Restore state to clear filltype and any other settings
-      (restorestate plotter)
-      
-      ;; Grid and border rendering in their own isolated state
-      (savestate plotter)
-      
-      ;; Grid lines (major)
-      (when grid-major-color
-        (pencolorname plotter grid-major-color)
-        (linewidth plotter 1)
-        ;; Draw horizontal grid lines (simplified - 5 lines)
-        (let ((y-step (/ (- y-max y-min) 6)))
-          (do ((i 1 (+ i 1)))
-              ((> i 5))
-            (let ((y (+ y-min (* i y-step))))
-              (fline plotter
-                     (exact->inexact x-min) (exact->inexact y)
-                     (exact->inexact x-max) (exact->inexact y)))))
-        ;; Draw vertical grid lines
-        (let ((x-step (/ (- x-max x-min) 6)))
-          (do ((i 1 (+ i 1)))
-              ((> i 5))
-            (let ((x (+ x-min (* i x-step))))
-              (fline plotter
-                     (exact->inexact x) (exact->inexact y-min)
-                     (exact->inexact x) (exact->inexact y-max))))))
-      
-      ;; Border
-      (when border-color
-        (pencolorname plotter border-color)
-        (linewidth plotter 1)
-        (fline plotter x-min y-min x-max y-min)  ; Bottom
-        (fline plotter x-max y-min x-max y-max)  ; Right
-        (fline plotter x-max y-max x-min y-max)  ; Top
-        (fline plotter x-min y-max x-min y-min)) ; Left
-      
-      ;; Restore state to clear any pen/line settings
-      (restorestate plotter)))
-
-  (define (render-layer layer spec scales plotter)
-    "Render a single geometry layer"
-    
-    (let* ((geom-name (layer-geom layer))
-           (layer-data (or (layer-data layer) (plot-spec-data spec)))
-           (layer-aes (aes-merge (plot-spec-default-aes spec) (layer-aes layer)))
-           (params (layer-params layer))
-           (stat (layer-stat layer)))
-      
-    ;; Apply statistical transformation if specified
-    (let* ((processed-data 
-            (if stat
-                (case stat
-                  ((stat-bin) (stat-bin layer-data layer-aes params))
-                  ((stat-density) (stat-density layer-data layer-aes params))
-                  ((stat-boxplot) (stat-boxplot layer-data layer-aes params))
-                  ((stat-violin) (stat-violin layer-data layer-aes params))
-                  ((stat-summary) (stat-summary layer-data layer-aes params))
-                  (else layer-data))
-
-                layer-data))
-           ;; Create aesthetic mapping for processed data
-           ;; For stat transformations, we need to update aesthetic mapping
-           ;; to reference the transformed column names
-           (processed-aes 
-             (if stat
-                 (case stat
-                   ((stat-bin) 
-                    ;; stat-bin produces: x (centers), width, y (counts)
-                    (aes #:x 'x #:width 'width #:y 'y))
-                   
-                   ((stat-density)
-                    ;; stat-density produces: x (points), y (density)
-                    (aes #:x 'x #:y 'y))
-                   
-                   ((stat-boxplot)
-                    ;; stat-boxplot produces: x, ymin, lower, middle, upper, ymax, outliers
-                    (aes #:x 'x #:ymin 'ymin #:lower 'lower 
-                         #:middle 'middle #:upper 'upper #:ymax 'ymax
-                         #:outliers 'outliers))
-                   
-                   ((stat-violin)
-                    ;; stat-violin produces: group, density-x, density-y, y-values
-                    (aes #:x 'group #:y 'y-values))
-                   
-                   ((stat-summary)
-                    ;; stat-summary produces: x, y, ymin, ymax
-                    (aes #:x 'x #:y 'y #:ymin 'ymin #:ymax 'ymax))
-                   
-                   (else layer-aes))
-                 layer-aes))
-
-           )
-      
-      ;; Dispatch to geometry renderer
-      (case geom-name
-        ((point) (render-geom-point layer-data layer-aes scales params plotter))
-        ((line) (render-geom-line layer-data layer-aes scales params plotter))
-        ((bar) (render-geom-bar layer-data layer-aes scales params plotter))
-        ((area) (render-geom-area layer-data layer-aes scales params plotter))
-        ((rect) (render-geom-rect layer-data layer-aes scales params plotter))
-        ((text) (render-geom-text layer-data layer-aes scales params plotter))
-        ((segment) (render-geom-segment layer-data layer-aes scales params plotter))
-        ((eventplot) (render-geom-eventplot layer-data layer-aes scales params plotter))
-        ;; Reference lines (don't use data)
-        ((hline) (render-geom-hline layer-data layer-aes scales params plotter))
-        ((vline) (render-geom-vline layer-data layer-aes scales params plotter))
-
-        ;; Statistical geometries
-        ((histogram) 
-         (render-geom-histogram processed-data processed-aes scales params plotter))
-        
-        ((density) 
-         (render-geom-density processed-data processed-aes scales params plotter))
-        
-        ((boxplot) 
-         (render-geom-boxplot processed-data processed-aes scales params plotter))
-        
-        ((violin) 
-         (render-geom-violin processed-data processed-aes scales params plotter))
-        
-        ((errorbar) 
-         (render-geom-errorbar processed-data processed-aes scales params plotter))
-        
-        ((pointrange)
-         (render-geom-pointrange processed-data processed-aes scales params plotter))
-        
-        ((linerange)
-         (render-geom-linerange processed-data processed-aes scales params plotter))
-        
-        ((crossbar)
-         (render-geom-crossbar processed-data processed-aes scales params plotter))
-        
-        ((col)
-         ;; Column chart uses summary stat, then renders as bars
-         (render-geom-bar processed-data processed-aes scales params plotter))
-        
-        (else (error "Unknown geometry" geom-name)))))
-    )
-
-  (define (render-geom-point data aes scales params plotter)
-    "Render point geometry with parameters"
-    (let ((size (or (assq-ref params 'size) 4))
+  (define (compile-geom-point data aes scales params)
+    "Compile point geometry into a drawer."
+    (let ((size  (or (assq-ref params 'size)  4))
           (shape (or (assq-ref params 'shape) 'circle))
           (alpha (or (assq-ref params 'alpha) 1.0)))
-      (let-values (((drawer _) (geom-point data aes 
+      (let-values (((drawer _) (geom-point data aes
                                            #:scales scales
                                            #:size size
                                            #:shape shape
                                            #:alpha alpha)))
-        (render-drawer drawer plotter))))
-  
-  (define (render-geom-line data aes scales params plotter)
-    "Render line geometry with parameters"
+        drawer)))
+
+  (define (compile-geom-line data aes scales params)
+    "Compile line geometry into a drawer."
     (let ((width (or (assq-ref params 'width) 2))
           (style (or (assq-ref params 'style) 'solid)))
-      (let-values (((drawer _) (geom-line data aes 
+      (let-values (((drawer _) (geom-line data aes
                                           #:scales scales
                                           #:width width
                                           #:style style)))
-        (render-drawer drawer plotter))))
-  
-  (define (render-geom-bar data aes scales params plotter)
-    "Render bar geometry with parameters"
-    (let ((fill (or (assq-ref params 'fill) "steelblue"))
+        drawer)))
+
+  (define (compile-geom-bar data aes scales params)
+    "Compile bar geometry into a drawer."
+    (let ((fill  (or (assq-ref params 'fill)  "steelblue"))
           (width (or (assq-ref params 'width) 0.8)))
-      (let-values (((drawer _) (geom-bar data aes 
+      (let-values (((drawer _) (geom-bar data aes
                                          #:scales scales
                                          #:fill fill
                                          #:width width)))
-        (render-drawer drawer plotter))))
-  
-  (define (render-geom-area data aes scales params plotter)
-    "Render area geometry with parameters"
-    (let ((fill (or (assq-ref params 'fill) "gray"))
+        drawer)))
+
+  (define (compile-geom-area data aes scales params)
+    "Compile area geometry into a drawer."
+    (let ((fill  (or (assq-ref params 'fill)  "gray"))
           (alpha (or (assq-ref params 'alpha) 0.5)))
-      (let-values (((drawer _) (geom-area data aes 
+      (let-values (((drawer _) (geom-area data aes
                                           #:scales scales
                                           #:fill fill
                                           #:alpha alpha)))
-        (render-drawer drawer plotter))))
-  
-  (define (render-geom-rect data aes scales params plotter)
-    "Render rectangle geometry
-   
-     Supports two modes:
-     1. Data-mapped: aesthetics map to data columns
-     2. Static: coordinates provided as parameters"
-  
-    ;; Check if we have static coordinates in params
+        drawer)))
+
+  (define (compile-geom-rect data aes scales params)
+    "Compile rectangle geometry into a drawer.
+     Two modes: static (coords in params) or data-mapped (via aesthetics)."
     (let ((xmin-param (assq-ref params 'xmin))
           (xmax-param (assq-ref params 'xmax))
           (ymin-param (assq-ref params 'ymin))
           (ymax-param (assq-ref params 'ymax)))
-      
       (if (and xmin-param xmax-param ymin-param ymax-param)
-          ;; Static rect mode: create dummy single-row data
+          ;; Static: build a single-row dataset from params
           (let* ((dummy-data `((xmin . (,xmin-param))
                                (xmax . (,xmax-param))
                                (ymin . (,ymin-param))
                                (ymax . (,ymax-param))))
-                 (dummy-aes (make-aes #:xmin 'xmin #:xmax 'xmax 
-                                      #:ymin 'ymin #:ymax 'ymax))
-                 ;; Extract visual parameters
-                 (fill-param (assq-ref params 'fill))
-                 (alpha-param (assq-ref params 'alpha)))
-            
-            ;; Build keyword arguments for geom-rect
-            (let ((geom-args (append
-                              (list dummy-data dummy-aes)
-                              (list #:scales scales)
-                              (if fill-param (list #:fill fill-param) '())
-                              (if alpha-param (list #:alpha alpha-param) '()))))
-              (let-values (((drawer _) (apply geom-rect geom-args)))
-                (render-drawer drawer plotter))))
-          
-          ;; Data-mapped mode: use aesthetics to map data columns
+                 (dummy-aes  (make-aes #:xmin 'xmin #:xmax 'xmax
+                                       #:ymin 'ymin #:ymax 'ymax))
+                 (fill-param  (assq-ref params 'fill))
+                 (alpha-param (assq-ref params 'alpha))
+                 (geom-args   (append
+                               (list dummy-data dummy-aes #:scales scales)
+                               (if fill-param  (list #:fill  fill-param)  '())
+                               (if alpha-param (list #:alpha alpha-param) '()))))
+            (let-values (((drawer _) (apply geom-rect geom-args)))
+              drawer))
+          ;; Data-mapped mode
           (let-values (((drawer _) (geom-rect data aes #:scales scales)))
-            (render-drawer drawer plotter)))))
-  
-  (define (render-geom-text data aes scales params plotter)
-    "Render text geometry"
-    (let ((size (or (assq-ref params 'size) 10.0))
+            drawer))))
+
+  (define (compile-geom-text data aes scales params)
+    "Compile text geometry into a drawer."
+    (let ((size  (or (assq-ref params 'size)  10.0))
           (color (or (assq-ref params 'color) "black")))
-      (let-values (((drawer _) (geom-text data aes 
+      (let-values (((drawer _) (geom-text data aes
                                           #:scales scales
                                           #:size size
                                           #:color color)))
-        (render-drawer drawer plotter))))
+        drawer)))
 
-  (define (render-geom-segment data aes scales params plotter)
-    "Render segment geometry"
+  (define (compile-geom-segment data aes scales params)
+    "Compile segment geometry into a drawer."
     (let ((width (or (assq-ref params 'width) 1))
           (color (or (assq-ref params 'color) "black")))
       (let-values (((drawer _) (geom-segment data aes
                                              #:scales scales
                                              #:color color
                                              #:width width)))
-        (render-drawer drawer plotter))))
+        drawer)))
 
-  (define (render-geom-eventplot data aes scales params plotter)
-    "Render eventplot geometry"
+  (define (compile-geom-eventplot data aes scales params)
+    "Compile eventplot geometry into a drawer."
     (let ((line-length (or (assq-ref params 'line-length) 2.8))
-          (color (or (assq-ref params 'color) "black"))
-          (width (or (assq-ref params 'width) 4)))
-      (let-values (((drawer _) (geom-eventplot data aes #:scales scales
+          (color       (or (assq-ref params 'color) "black"))
+          (width       (or (assq-ref params 'width) 4)))
+      (let-values (((drawer _) (geom-eventplot data aes
+                                               #:scales scales
                                                #:line-length line-length
                                                #:color color
                                                #:width width)))
-        (render-drawer drawer plotter))))
+        drawer)))
 
-  (define (render-geom-hline data aes scales params plotter)
-    "Render horizontal reference line
-     
-     Unlike other geometries, hline doesn't use data.
-     It draws a line at a fixed y-value across the entire x-range."
-    
-    (let* ((y-scale (assq-ref scales 'y))
-           (x-scale (assq-ref scales 'x))
+  ;;; hline / vline
+
+  (define (compile-geom-hline data aes scales params)
+    "Compile horizontal reference line into a drawer."
+    (let* ((y-scale    (assq-ref scales 'y))
+           (x-scale    (assq-ref scales 'x))
            (yintercept (assq-ref params 'yintercept))
-           (color (or (assq-ref params 'color) "black"))
-           (width (or (assq-ref params 'width) 1))
-           (linetype (or (assq-ref params 'linetype) 'solid)))
-      
-      ;; Get the y-position from the intercept value
-      (let ((y-pos (scale-map y-scale yintercept))
-            (x-range (scale-range x-scale)))
-        
-        ;; Draw line across full x-range
-        (savestate plotter)
-        (pencolorname plotter color)
-        (linewidth plotter width)
-        
-        ;; Set line style
-        (case linetype
-          ((dashed) (linedash plotter (list 10 5) 0))
-          ((dotted) (linedash plotter (list 2 5) 0))
-          ((solid) (linedash plotter '() 0)))
-        
-        (fline plotter (car x-range) y-pos (cdr x-range) y-pos)
-        (restorestate plotter))))
+           (color      (or (assq-ref params 'color) "black"))
+           (width      (or (assq-ref params 'width) 1))
+           (linetype   (or (assq-ref params 'linetype) 'solid))
+           (y-pos      (scale-map y-scale yintercept))
+           (x-range    (scale-range x-scale)))
+      (with-linetype linetype
+        (with-pen-color color
+          (with-line-width (exact->inexact width)
+            (h-line-drawer (car x-range) (cdr x-range) y-pos))))))
 
-  (define (render-geom-vline data aes scales params plotter)
-    "Render vertical reference line
-     
-     Unlike other geometries, vline doesn't use data.
-     It draws a line at a fixed x-value across the entire y-range."
-
-    (let* ((x-scale (assq-ref scales 'x))
-           (y-scale (assq-ref scales 'y))
+  (define (compile-geom-vline data aes scales params)
+    "Compile vertical reference line into a drawer."
+    (let* ((x-scale    (assq-ref scales 'x))
+           (y-scale    (assq-ref scales 'y))
            (xintercept (assq-ref params 'xintercept))
-           (color (or (assq-ref params 'color) "black"))
-           (width (or (assq-ref params 'width) 1))
-           (linetype (or (assq-ref params 'linetype) 'solid)))
-      
-      ;; Get the x-position from the intercept value
-      (let ((x-pos (scale-map x-scale xintercept))
-            (y-range (scale-range y-scale)))
-        
-        ;; Draw line across full y-range
-        (savestate plotter)
-        (pencolorname plotter color)
-        (flinewidth plotter (exact->inexact width))
-        
-        ;; Set line style
-        (case linetype
-          ((dashed) (linedash plotter (list 10 5) 0))
-          ((dotted) (linedash plotter (list 2 5) 0))
-          ((solid) (linedash plotter '() 0)))
-        
-        (fline plotter (exact->inexact x-pos)
-               (exact->inexact (car y-range))
-               (exact->inexact x-pos)
-               (exact->inexact (cdr y-range)))
-        (restorestate plotter))))
+           (color      (or (assq-ref params 'color) "black"))
+           (width      (or (assq-ref params 'width) 1))
+           (linetype   (or (assq-ref params 'linetype) 'solid))
+           (x-pos      (scale-map x-scale xintercept))
+           (y-range    (scale-range y-scale)))
+      (with-linetype linetype
+        (with-pen-color color
+          (with-line-width (exact->inexact width)
+            (v-line-drawer x-pos (car y-range) (cdr y-range)))))))
+
+  ;;; Statistical geometry compilers
+  ;;; These simply call the corresponding geom-* function and extract the drawer.
+
+  (define (compile-geom-histogram data aes scales params)
+    (let ((fill  (or (assq-ref params 'fill)  "steelblue"))
+          (color (or (assq-ref params 'color) "black")))
+      (let-values (((drawer _) (geom-histogram data aes
+                                               #:scales scales
+                                               #:fill fill
+                                               #:color color)))
+        drawer)))
+
+  (define (compile-geom-density data aes scales params)
+    (let ((fill     (or (assq-ref params 'fill)      "lightblue"))
+          (alpha    (or (assq-ref params 'alpha)     0.5))
+          (color    (or (assq-ref params 'color)     "navy"))
+          (geom-type (or (assq-ref params 'geom-type) 'area)))
+      (let-values (((drawer _) (geom-density data aes
+                                             #:scales scales
+                                             #:fill fill
+                                             #:alpha alpha
+                                             #:color color
+                                             #:geom-type geom-type)))
+        drawer)))
+
+  (define (compile-geom-boxplot data aes scales params)
+    (let ((fill           (or (assq-ref params 'fill)           "white"))
+          (color          (or (assq-ref params 'color)          "black"))
+          (outlier-color  (or (assq-ref params 'outlier-color)  "red"))
+          (outlier-size   (or (assq-ref params 'outlier-size)   3))
+          (width          (or (assq-ref params 'width)          0.6)))
+      (let-values (((drawer _) (geom-boxplot data aes
+                                             #:scales scales
+                                             #:fill fill
+                                             #:color color
+                                             #:outlier-color outlier-color
+                                             #:outlier-size outlier-size
+                                             #:width width)))
+        drawer)))
+
+  (define (compile-geom-violin data aes scales params)
+    (let ((fill        (or (assq-ref params 'fill)        "lightgray"))
+          (color       (or (assq-ref params 'color)       "black"))
+          (scale-width (or (assq-ref params 'scale-width) #t)))
+      (let-values (((drawer _) (geom-violin data aes
+                                            #:scales scales
+                                            #:fill fill
+                                            #:color color
+                                            #:scale-width scale-width)))
+        drawer)))
+
+  (define (compile-geom-errorbar data aes scales params)
+    (let ((color     (or (assq-ref params 'color)     "black"))
+          (width     (or (assq-ref params 'width)     2))
+          (cap-width (or (assq-ref params 'cap-width) 0.2)))
+      (let-values (((drawer _) (geom-errorbar data aes
+                                              #:scales scales
+                                              #:color color
+                                              #:width width
+                                              #:cap-width cap-width)))
+        drawer)))
+
+  (define (compile-geom-pointrange data aes scales params)
+    (let ((color      (or (assq-ref params 'color)      "black"))
+          (point-size (or (assq-ref params 'point-size) 4))
+          (line-width (or (assq-ref params 'line-width) 2)))
+      (let-values (((drawer _) (geom-pointrange data aes
+                                                #:scales scales
+                                                #:color color
+                                                #:point-size point-size
+                                                #:line-width line-width)))
+        drawer)))
+
+  (define (compile-geom-linerange data aes scales params)
+    (let ((color (or (assq-ref params 'color) "black"))
+          (width (or (assq-ref params 'width) 2)))
+      (let-values (((drawer _) (geom-linerange data aes
+                                               #:scales scales
+                                               #:color color
+                                               #:width width)))
+        drawer)))
+
+  (define (compile-geom-crossbar data aes scales params)
+    (let ((fill  (or (assq-ref params 'fill)  "white"))
+          (color (or (assq-ref params 'color) "black"))
+          (width (or (assq-ref params 'width) 0.5)))
+      (let-values (((drawer _) (geom-crossbar data aes
+                                              #:scales scales
+                                              #:fill fill
+                                              #:color color
+                                              #:width width)))
+        drawer)))
+
+  ;;; ── Axes ─────────────────────────────────────────────────────────────────
 
   (define (get-scale-label scale-specs scale-key)
     "Extract label (name) from scale specification"
@@ -2126,35 +2114,29 @@
       (if scale-spec
           (or (assq-ref (cdr scale-spec) 'name) "")
           "")))
-  
-  (define (render-panel-axes scales plotter theme bounds spec)
-    "Render panel axes using gg-guides"
-    
-    (let ((x-scale (assq-ref scales 'x))
-          (y-scale (assq-ref scales 'y))
-          (x-min (first bounds))
-          (y-min (second bounds))
+
+  (define (compile-panel-axes-drawer scales theme bounds spec)
+    "Return a drawer for panel axes (x and y)."
+    (let ((x-scale     (assq-ref scales 'x))
+          (y-scale     (assq-ref scales 'y))
+          (x-min       (first  bounds))
+          (y-min       (second bounds))
           (scale-specs (plot-spec-scales spec)))
-    
-      (when x-scale
-        ;; Extract x-axis label from scale specification
-        (let* ((x-label (get-scale-label scale-specs 'scale-x))
-               (x-axis (make-axis-bottom x-scale 
-                                         #:label x-label 
-                                         #:tick-count 5))
-               (axis-drw (axis-drawer x-axis))
-               (positioned-drw (with-translate 0 y-min axis-drw)))
-          (render-drawer positioned-drw plotter)))
-      
-      (when y-scale
-        ;; Extract y-axis label from scale specification
-        (let* ((y-label (get-scale-label scale-specs 'scale-y))
-               (y-axis (make-axis-left y-scale 
-                                       #:label y-label 
-                                       #:tick-count 5))
-               (axis-drw (axis-drawer y-axis))
-               (positioned-drw (with-translate x-min 0 axis-drw)))
-          (render-drawer positioned-drw plotter)))))
+      (combine
+        (if x-scale
+            (let* ((x-label (get-scale-label scale-specs 'scale-x))
+                   (x-axis  (make-axis-bottom x-scale
+                                              #:label x-label
+                                              #:tick-count 5)))
+              (with-translate 0 y-min (axis-drawer x-axis)))
+            empty-drawer)
+        (if y-scale
+            (let* ((y-label (get-scale-label scale-specs 'scale-y))
+                   (y-axis  (make-axis-left y-scale
+                                            #:label y-label
+                                            #:tick-count 5)))
+              (with-translate x-min 0 (axis-drawer y-axis)))
+            empty-drawer))))
 
 
   ;;; ========================================================================
@@ -2388,296 +2370,214 @@
   ;;; Global Elements
   ;;; ------------------------------------------------------------------------
 
-  (define (render-global-elements spec scales plotter width height theme labels)
-    "Render title, legends, and other global elements"
-    
-    ;; Render title if specified
-    (let ((title (assq-ref labels 'title)))
-      (when title
-        (render-title title plotter width height theme)))
+  (define (compile-global-elements-drawer spec scales width height theme labels)
+    "Return a drawer for title, subtitle, and legends."
+    (let ((title    (assq-ref labels 'title))
+          (subtitle (assq-ref labels 'subtitle)))
+      (combine
+        (if title    (compile-title-drawer    title    width height theme) empty-drawer)
+        (if subtitle (compile-subtitle-drawer subtitle width height theme) empty-drawer)
+        (compile-legends-drawer spec scales width height theme))))
 
-    ;; Render subtitle if specified
-    (let ((subtitle (assq-ref labels 'subtitle)))
-      (when subtitle
-        (render-subtitle subtitle plotter width height theme)))
-    
-    ;; Render legends
-    (render-legends spec scales plotter width height theme))
-
-  (define (render-title title plotter width height theme)
-    "Render plot title"
-    (let* ((base-size (or (assq-ref theme 'base-size) 11.0))
+  (define (compile-title-drawer title width height theme)
+    "Return a drawer for the plot title at top-centre."
+    (let* ((base-size  (or (assq-ref theme 'base-size) 11.0))
            (title-size (* base-size 1.5))
-           (x (/ width 2))
-           (y (- height 30)))
-      
-      ;; Position title at top center
-      (savestate plotter)
-      (ffontsize plotter (exact->inexact title-size))
-      (pencolorname plotter "black")
-      (move plotter x y)
-      (alabel plotter (HCenter) (VCenter) title)
-      (restorestate plotter)))
+           (x          (exact->inexact (/ width 2)))
+           (y          (exact->inexact (- height 30))))
+      (with-pen-color "black"
+        (with-font "sans" title-size 'normal 'bold
+          (text-drawer x y title
+                       #:halign halign/center
+                       #:valign valign/center)))))
 
-  (define (render-subtitle subtitle plotter width height theme)
-    "Render plot subtitle below title"
-    (let* ((base-size (or (assq-ref theme 'base-size) 11.0))
+  (define (compile-subtitle-drawer subtitle width height theme)
+    "Return a drawer for the plot subtitle, below the title."
+    (let* ((base-size     (or (assq-ref theme 'base-size) 11.0))
            (subtitle-size (* base-size 1.2))
-           (x (/ width 2))
-           (y (- height 50)))  ; Position below title (title is at height-30)
-      
-      ;; Position subtitle at top center, below title
-      (savestate plotter)
-      (ffontsize plotter (exact->inexact subtitle-size))
-      (pencolorname plotter "gray30")
-      (move plotter x y)
-      (alabel plotter (HCenter) (VCenter) subtitle)
-      (restorestate plotter)))
+           (x             (exact->inexact (/ width 2)))
+           (y             (exact->inexact (- height 50))))
+      (with-pen-color "gray30"
+        (with-font "sans" subtitle-size 'italic 'normal
+          (text-drawer x y subtitle
+                       #:halign halign/center
+                       #:valign valign/center)))))
 
 
 
-  (define (render-legends spec scales plotter width height theme)
-    "Render legends with positioning strategies"
-    (let* ((legend-props (assq-ref theme 'legend))
-           (legend-position (assq-ref legend-props 'position))
-           (legend-inside-pos (assq-ref legend-props 'inside-position))
+  (define (compile-legends-drawer spec scales width height theme)
+    "Return a combined drawer for all legends."
+    (let* ((legend-props     (assq-ref theme 'legend))
+           (legend-position  (assq-ref legend-props 'position))
+           (legend-inside-pos  (assq-ref legend-props 'inside-position))
            (legend-outside-pos (assq-ref legend-props 'outside-position))
            (color-scale (assq-ref scales 'color))
-           (fill-scale (assq-ref scales 'fill))
-           (legends '())
-           )
-      ;; Collect legends to render
+           (fill-scale  (assq-ref scales 'fill))
+           (legends '()))
+      ;; Build legend spec list
       (let* ((legends
-              ;; Build legend specs
               (if color-scale
-                  (let ((name (get-scale-label (plot-spec-scales spec) 'scale-color)))
-                    (cons `(discrete ,(or name "Color") items 150 200)
-                          legends))
+                  (cons `(discrete ,(or (get-scale-label (plot-spec-scales spec) 'scale-color)
+                                        "Color")
+                                   items 150 200)
+                        legends)
                   legends))
              (legends
               (if fill-scale
-                  (let ((name (get-scale-label (plot-spec-scales spec) 'scale-fill)))
-                    (cons `(discrete ,(or name "Fill") items 150 200)
-                          legends))
+                  (cons `(discrete ,(or (get-scale-label (plot-spec-scales spec) 'scale-fill)
+                                        "Fill")
+                                   items 150 200)
+                        legends)
                   legends)))
-        
-        ;; Skip if no legends or position is 'none
-        (unless (or (null? legends) (eq? legend-position 'none))
-          
-          ;; Create bounding boxes for positioning
-          (let* ((panel-bounds (assq-ref (car (compute-facet-panels spec scales width height))
-                                         'bounds))
-                 (x-min (first panel-bounds))
-                 (y-min (second panel-bounds))
-                 (x-max (third panel-bounds))
-                 (y-max (fourth panel-bounds))
-                 (panel-bbox (make-bbox x-min y-min x-max y-max))
-                 (plot-bbox (make-bbox 0 0 width height))
-                 
-                 ;; Determine positioning strategy
-                 (positioned-legends
-                  (cond
-                   ;; Inside panel positioning
-                   ((and (eq? legend-position 'inside) legend-inside-pos)
-                    (legend-position-inside legends legend-inside-pos panel-bbox))
-                   
-                   ;; Outside panel positioning
-                   ((and (eq? legend-position 'outside) legend-outside-pos)
-                    (legend-position-outside legends legend-outside-pos panel-bbox plot-bbox))
-                   
-                   ;; Manual absolute position
-                   ((pair? legend-position)
-                    (list (cons (car legends) legend-position)))
-                   
-                   ;; Symbol position (right, left, top, bottom)
-                   ((symbol? legend-position)
-                    (case legend-position
-                      ((inside)
-                       (legend-position-inside legends 
-                                               (or legend-inside-pos 'top-right) 
-                                               panel-bbox))
-                      ((outside)
-                       (legend-position-outside legends 
-                                                (or legend-outside-pos 'right)
-                                                panel-bbox plot-bbox))
+        ;; Nothing to draw
+        (if (or (null? legends) (eq? legend-position 'none))
+            empty-drawer
+            (let* ((panel-bounds (assq-ref (car (compute-facet-panels spec scales width height))
+                                           'bounds))
+                   (x-min (first  panel-bounds)) (y-min (second panel-bounds))
+                   (x-max (third  panel-bounds)) (y-max (fourth panel-bounds))
+                   (panel-bbox (make-bbox x-min y-min x-max y-max))
+                   (plot-bbox  (make-bbox 0 0 width height))
+                   (positioned-legends
+                    (cond
+                      ((and (eq? legend-position 'inside) legend-inside-pos)
+                       (legend-position-inside legends legend-inside-pos panel-bbox))
+                      ((and (eq? legend-position 'outside) legend-outside-pos)
+                       (legend-position-outside legends legend-outside-pos panel-bbox plot-bbox))
+                      ((pair? legend-position)
+                       (list (cons (car legends) legend-position)))
+                      ((symbol? legend-position)
+                       (case legend-position
+                         ((inside)
+                          (legend-position-inside legends
+                                                  (or legend-inside-pos 'top-right)
+                                                  panel-bbox))
+                         ((outside)
+                          (legend-position-outside legends
+                                                   (or legend-outside-pos 'right)
+                                                   panel-bbox plot-bbox))
+                         (else
+                          (legend-position-outside legends legend-position
+                                                   panel-bbox plot-bbox))))
                       (else
-                       (legend-position-outside legends legend-position 
-                                                panel-bbox plot-bbox))))
-                   
-                   ;; Default: auto positioning (right margin)
-                   (else
-                    (legend-position-auto legends plot-bbox panel-bbox)))))
-          
-            ;; Render each positioned legend
-            (for-each
-             (lambda (positioned-legend idx)
-               (let* ((legend-spec (car positioned-legend))
-                      (pos (cdr positioned-legend))
-                      (legend-x (car pos))
-                      (legend-y (cdr pos))
-                      ;; Get corresponding scale
-                      (scale (if (= idx 0) color-scale fill-scale))
-                      (title (cadr legend-spec)))
-                 
-                 (when scale
-                   (let* ((legend (make-legend-discrete scale
-                                                        #:title title
-                                                        #:position (cons legend-x legend-y)))
-                          (legend-drw (legend-drawer legend)))
-                     (render-drawer legend-drw plotter)))))
-             positioned-legends
-             (iota (length positioned-legends)))))))
+                       (legend-position-auto legends plot-bbox panel-bbox)))))
+              ;; Build a drawer for each positioned legend
+              (apply combine
+                (map (lambda (positioned-legend idx)
+                       (let* ((legend-spec (car positioned-legend))
+                              (pos         (cdr positioned-legend))
+                              (legend-x    (car pos))
+                              (legend-y    (cdr pos))
+                              (scale       (if (= idx 0) color-scale fill-scale))
+                              (title       (cadr legend-spec)))
+                         (if scale
+                             (let* ((legend     (make-legend-discrete scale
+                                                                      #:title title
+                                                                      #:position (cons legend-x legend-y)))
+                                    (legend-drw (legend-drawer legend)))
+                               legend-drw)
+                             empty-drawer)))
+                     positioned-legends
+                     (iota (length positioned-legends))))
+              ))
+        ))
     )
   
-(define (render-annotation-layer layer scales panel plotter)
-  "Render an annotation layer with type-specific handling
-   
-   Dispatches to specialized renderers for vline, hline, abline annotations"
+  
+(define (compile-annotation-layer-drawer layer scales panel)
+  "Return a drawer for an annotation layer."
   (match layer
     (('layer 'annotation params ...)
-     (let ((geom (assq-ref params 'geom))
-           (spec (assq-ref params 'spec))
+     (let ((geom         (assq-ref params 'geom))
+           (spec         (assq-ref params 'spec))
            (panel-bounds (assq-ref panel 'bounds)))
-
-       ;; Dispatch based on annotation geometry type
        (case geom
-         ;; Reference lines use specialized renderers
-         ((vline-annotation)
-          (render-vline-annotation spec scales panel-bounds plotter))
-         
-         ((hline-annotation)
-          (render-hline-annotation spec scales panel-bounds plotter))
-         
-         ((abline-annotation)
-          (render-abline-annotation spec scales panel-bounds plotter))
-         
-         ;; General annotations use render-annotation from gg-layout
-         (else
-          (let ((drawer (render-annotation spec scales)))
-            (render-drawer drawer plotter))))))
-    (else (void))))
+         ((vline-annotation) (compile-vline-annotation-drawer spec scales panel-bounds))
+         ((hline-annotation) (compile-hline-annotation-drawer spec scales panel-bounds))
+         ((abline-annotation)(compile-abline-annotation-drawer spec scales panel-bounds))
+         (else               (render-annotation spec scales)))))
+    (else empty-drawer)))
   
 
 
-(define (render-vline-annotation spec scales panel-bounds plotter)
-  "Render vertical reference line with linetype handling"
+(define (compile-vline-annotation-drawer spec scales panel-bounds)
+  "Return a drawer for a vertical reference line annotation."
   (match spec
     (('annotation 'vline params ...)
-     (let* ((x (assq-ref params 'xintercept))
-            (color (assq-ref/dflt params 'color "black"))
-            (lw (assq-ref/dflt params 'line-width 1))
+     (let* ((x        (assq-ref params 'xintercept))
+            (color    (assq-ref/dflt params 'color "black"))
+            (lw       (assq-ref/dflt params 'line-width 1))
             (linetype (assq-ref/dflt params 'linetype 'solid))
-            (x-scale (assq-ref scales 'x))
-            (y-scale (assq-ref scales 'y))
-            ;; Use panel bounds for y-range if scale not available
-            (y-range (if y-scale
-                        (scale-range y-scale)
-                        (cons (second panel-bounds) (fourth panel-bounds)))))
-
-       (when x-scale  ; Only render if x-scale exists
-         (let ((px (scale-map x-scale x))
-               (y-min (car y-range))
-               (y-max (cdr y-range)))
-           ;; Save state and apply line style
-           (savestate plotter)
-           (pencolorname plotter color)
-           (flinewidth plotter (exact->inexact lw))
-           
-           ;; Apply linetype
-           (case linetype
-             ((dashed) (linedash plotter (list 10 5) 0))
-             ((dotted) (linedash plotter (list 2 5) 0))
-             ((solid) (linedash plotter '() 0)))
-           
-           ;; Draw line
-           (fline plotter 
-                  (exact->inexact px) (exact->inexact y-min)
-                  (exact->inexact px) (exact->inexact y-max))
-           
-           (restorestate plotter)))))))
+            (x-scale  (assq-ref scales 'x))
+            (y-scale  (assq-ref scales 'y))
+            (y-range  (if y-scale
+                          (scale-range y-scale)
+                          (cons (second panel-bounds) (fourth panel-bounds)))))
+       (if x-scale
+           (let ((px    (exact->inexact (scale-map x-scale x)))
+                 (y-min (exact->inexact (car y-range)))
+                 (y-max (exact->inexact (cdr y-range))))
+             (with-linetype linetype
+               (with-pen-color color
+                 (with-line-width (exact->inexact lw)
+                   (v-line-drawer px y-min y-max)))))
+           empty-drawer)))
+    (else empty-drawer)))
 
 
-(define (render-hline-annotation spec scales panel-bounds plotter)
-  "Render horizontal reference line with linetype handling"
+(define (compile-hline-annotation-drawer spec scales panel-bounds)
+  "Return a drawer for a horizontal reference line annotation."
   (match spec
     (('annotation 'hline params ...)
-     (let* ((y (assq-ref params 'yintercept))
-            (color (assq-ref/dflt params 'color "black"))
-            (lw (assq-ref/dflt params 'line-width 1))
+     (let* ((y        (assq-ref params 'yintercept))
+            (color    (assq-ref/dflt params 'color "black"))
+            (lw       (assq-ref/dflt params 'line-width 1))
             (linetype (assq-ref/dflt params 'linetype 'solid))
-            (x-scale (assq-ref scales 'x))
-            (y-scale (assq-ref scales 'y))
-            ;; Use panel bounds for x-range if scale not available
-            (x-range (if x-scale
-                        (scale-range x-scale)
-                        (cons (first panel-bounds) (third panel-bounds)))))
-       
-       (when y-scale  ; Only render if y-scale exists
-         (let ((py (scale-map y-scale y))
-               (x-min (car x-range))
-               (x-max (cdr x-range)))
-           
-           ;; Save state and apply line style
-           (savestate plotter)
-           (pencolorname plotter color)
-           (flinewidth plotter (exact->inexact lw))
-           
-           ;; Apply linetype
-           (case linetype
-             ((dashed) (linedash plotter (list 10 5) 0))
-             ((dotted) (linedash plotter (list 2 5) 0))
-             ((solid) (linedash plotter '() 0)))
-           
-           ;; Draw line
-           (fline plotter 
-                  (exact->inexact x-min) (exact->inexact py)
-                  (exact->inexact x-max) (exact->inexact py))
-           
-           (restorestate plotter)))))))
-  
+            (x-scale  (assq-ref scales 'x))
+            (y-scale  (assq-ref scales 'y))
+            (x-range  (if x-scale
+                          (scale-range x-scale)
+                          (cons (first panel-bounds) (third panel-bounds)))))
+       (if y-scale
+           (let ((py    (exact->inexact (scale-map y-scale y)))
+                 (x-min (exact->inexact (car x-range)))
+                 (x-max (exact->inexact (cdr x-range))))
+             (with-linetype linetype
+               (with-pen-color color
+                 (with-line-width (exact->inexact lw)
+                   (h-line-drawer x-min x-max py)))))
+           empty-drawer)))
+    (else empty-drawer)))
 
-(define (render-abline-annotation spec scales panel-bounds plotter)
-  "Render diagonal reference line with proper coordinate transformation"
+
+(define (compile-abline-annotation-drawer spec scales panel-bounds)
+  "Return a drawer for a diagonal (slope-intercept) reference line annotation."
   (match spec
     (('annotation 'abline params ...)
-     (let* ((slope (assq-ref params 'slope))
+     (let* ((slope     (assq-ref params 'slope))
             (intercept (assq-ref params 'intercept))
-            (color (assq-ref/dflt params 'color "black"))
-            (lw (assq-ref/dflt params 'line-width 1))
-            (linetype (assq-ref/dflt params 'linetype 'solid))
-            (x-scale (assq-ref scales 'x))
-            (y-scale (assq-ref scales 'y)))
-       
-       (when (and x-scale y-scale)  ; Need both scales
-         (let* ((x-range (scale-range x-scale))
-                (x-min (car x-range))
-                (x-max (cdr x-range))
-                ;; Compute endpoints in data space
-                (data-x-min (scale-inverse x-scale x-min))
-                (data-x-max (scale-inverse x-scale x-max))
-                (data-y-min (+ (* slope data-x-min) intercept))
-                (data-y-max (+ (* slope data-x-max) intercept))
-                ;; Transform back to pixel space
-                (py-min (scale-map y-scale data-y-min))
-                (py-max (scale-map y-scale data-y-max)))
-           
-           ;; Save state and apply line style
-           (savestate plotter)
-           (pencolorname plotter color)
-           (flinewidth plotter (exact->inexact lw))
-           
-           ;; Apply linetype
-           (case linetype
-             ((dashed) (linedash plotter (list 10 5) 0))
-             ((dotted) (linedash plotter (list 2 5) 0))
-             ((solid) (linedash plotter '() 0)))
-           
-           ;; Draw line
-           (fline plotter 
-                  (exact->inexact x-min) (exact->inexact py-min)
-                  (exact->inexact x-max) (exact->inexact py-max))
-           
-           (restorestate plotter)))))))
+            (color     (assq-ref/dflt params 'color "black"))
+            (lw        (assq-ref/dflt params 'line-width 1))
+            (linetype  (assq-ref/dflt params 'linetype 'solid))
+            (x-scale   (assq-ref scales 'x))
+            (y-scale   (assq-ref scales 'y)))
+       (if (and x-scale y-scale)
+           (let* ((x-range    (scale-range x-scale))
+                  (px-min     (exact->inexact (car x-range)))
+                  (px-max     (exact->inexact (cdr x-range)))
+                  (data-x-min (scale-inverse x-scale px-min))
+                  (data-x-max (scale-inverse x-scale px-max))
+                  (py-min     (exact->inexact
+                               (scale-map y-scale (+ (* slope data-x-min) intercept))))
+                  (py-max     (exact->inexact
+                               (scale-map y-scale (+ (* slope data-x-max) intercept)))))
+             (with-linetype linetype
+               (with-pen-color color
+                 (with-line-width (exact->inexact lw)
+                   (line-drawer px-min py-min px-max py-max)))))
+           empty-drawer)))
+    (else empty-drawer)))
+
 
   ;;; ========================================================================
   ;;; Helper Functions
@@ -2699,56 +2599,35 @@
   ;;; Automatic Resource Management
   ;;; ------------------------------------------------------------------------
 
-  (define (with-plotter-context plotter-ctx thunk)
-    "Execute thunk with plotter context, ensuring cleanup
-   
-   Example:
-     (with-plotter-context (make-png-plotter \"out.png\" 800 600)
-       (lambda (ctx)
-         (render-plot my-plot ctx)))"
-    (dynamic-wind
-        (lambda () #f)
-        (lambda () (thunk plotter-ctx))
-        (lambda () (delete-plotter (plotter-context-plotter plotter-ctx)))))
+  ;;; ========================================================================
+  ;;; High-Level Save / Display Functions
+  ;;; ========================================================================
 
-  ;;; ------------------------------------------------------------------------ 
-  ;;; High-Level Save Functions
-  ;;; ------------------------------------------------------------------------
+  (define (ggsave plot filename #!key (width 800) (height 600))
+    "Save a plot to a PNG file via the Cairo backend.
 
-  (define (ggsave plot filename #!key (width 800) (height 600) (scale 2))
-    "Save plot to PNG file with automatic resource management
-   
      Arguments:
-       plot:     Plot specification from ggplot
-       filename: Output filename (e.g., \"myplot.png\")
-       width:    Plot width in points (default: 800)
-       height:   Plot height in points (default: 600)
-       scale:    Resolution multiplier (default: 2)
-   
+       plot:     plot specification from ggplot
+       filename: output file path, e.g. \"plot.png\"
+       width:    pixel width  (default 800)
+       height:   pixel height (default 600)
+
      Example:
        (ggsave my-plot \"output.png\" #:width 1000 #:height 600)"
-  
-    (with-plotter-context
-     (make-png-plotter filename width height scale)
-     (lambda (ctx)
-       (render-plot plot ctx))))
+    (let ((backend (make-cairo-png-backend filename width height)))
+      (render-plot plot backend)))
 
-  (define (ggdisplay plot #!key (width 800) (height 600) (display-name ":0"))
-    "Display plot in X11 window (interactive)
-   
-     Arguments:
-       plot:         Plot specification from ggplot
-       width:        Window width in pixels (default: 800)
-       height:       Window height in pixels (default: 600)
-       display-name: X11 display (default: \":0\")
-   
+  (define (ggdisplay plot #!key (width 800) (height 600))
+    "Save a plot to a temporary PNG and display it.
+
+     This is a lightweight substitute for an X11-live display.
+     The temporary file is written to /tmp/ggplot-display.png.
+
      Example:
        (ggdisplay my-plot #:width 1000 #:height 700)"
-  
-    (with-plotter-context
-     (make-x-plotter width height display-name)
-     (lambda (ctx)
-       (render-plot plot ctx))))
+    (let ((tmpfile "/tmp/ggplot-display.png"))
+      (ggsave plot tmpfile #:width width #:height height)
+      (display (string-append "Plot written to " tmpfile "\n"))))
   
   (include "gg-stat.scm")
   

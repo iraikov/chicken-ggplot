@@ -4,13 +4,22 @@
 (import scheme
         (chicken base)
         (chicken random)
-        gg-primitives
+        gg-primitives-vge
+        gg-vge
+        gg-backend-cairo
         gg-scales
         gg-guides
         gg-aes
         gg-data
         gg-geom
         srfi-1)
+
+;;; Local render helper: emit a drawer into a VGE then render to PNG.
+(define (render-to-png drawer filename width height)
+  (let* ((backend (make-cairo-png-backend filename width height))
+         (vge     (make-vge)))
+    (render-drawer drawer vge)
+    (vge-render! vge backend)))
 
 ;;; ========================================================================
 ;;; Basic scatter plot with geom-point
@@ -35,18 +44,17 @@
               (y-axis (make-axis-left y-scale #:label "Y Variable")))
          
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          points
-         (text 400 560 "Scatter Plot with geom-point"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Scatter Plot with geom-point"))))))
     ))
 
 (define (run-example-geom-point)
-  (render example-geom-point
-          (make-png-plotter "example-geom-point.png" 800 600)))
+  (render-to-png example-geom-point "example-geom-point.png" 800 600))
 
 ;;; ========================================================================
 ;;; Line plot with geom-line
@@ -73,19 +81,18 @@
               (y-axis (make-axis-left y-scale #:label "Y Variable")))
         
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          lines
-         (text 400 560 "Line Plot with geom-line"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Line Plot with geom-line"))))))
     ))
   
 
 (define (run-example-geom-line)
-  (render example-geom-line
-          (make-png-plotter "example-geom-line.png" 800 600)))
+  (render-to-png example-geom-line "example-geom-line.png" 800 600))
 
 ;;; ========================================================================
 ;;; Bar chart with geom-bar
@@ -111,17 +118,16 @@
              (y-axis (make-axis-left y-scale #:label "Count")))
         
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          bars  ; No translation - already in absolute coordinates
-         (text 400 560 "Bar Chart with geom-bar"
-               #:color "black" #:size 15.0))))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Bar Chart with geom-bar"))))))))
       
 (define (run-example-geom-bar)
-  (render example-geom-bar
-          (make-png-plotter "example-geom-bar.png" 800 600)))
+  (render-to-png example-geom-bar "example-geom-bar.png" 800 600))
 
 ;;; ========================================================================
 ;;; Grouped line plot
@@ -148,18 +154,17 @@
               (y-axis (make-axis-left y-scale #:label "Y Variable")))
     
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          lines
-         (text 400 560 "Grouped Lines"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Grouped Lines"))))))
     ))
 
 (define (run-example-line-plot)
-  (render example-line-plot
-          (make-png-plotter "example-line-plot.png" 800 600)))
+  (render-to-png example-line-plot "example-line-plot.png" 800 600))
 
 ;;; ========================================================================
 ;;; Area plot with geom-area
@@ -188,19 +193,18 @@
               (y-axis (make-axis-left y-scale #:label "Y Variable")))
     
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          area
          line-drawer
-         (text 400 560 "Area Plot with geom-area"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Area Plot with geom-area"))))))
     ))
 
 (define (run-example-geom-area)
-  (render example-geom-area
-          (make-png-plotter "example-geom-area.png" 800 600)))
+  (render-to-png example-geom-area "example-geom-area.png" 800 600))
 
 ;;; ========================================================================
 ;;; Text labels with geom-text
@@ -231,19 +235,18 @@
 
     
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          points
          (with-translate 0 15 labels)
-         (text 400 560 "Points with Labels"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Points with Labels"))))))
     ))
 
 (define (run-example-geom-text)
-  (render example-geom-text
-          (make-png-plotter "example-geom-text.png" 800 600)))
+  (render-to-png example-geom-text "example-geom-text.png" 800 600))
 
 ;;; ========================================================================
 ;;; Spike raster with geom-eventplot (neuroscience)
@@ -300,33 +303,33 @@
              ;; Stimulus period marker
              (stim-start 30)
              (stim-end 60)
-             (stim-rect (rectangle (scale-map x-scale stim-start)
-                                   80
-                                   (- (scale-map x-scale stim-end)
-                                      (scale-map x-scale stim-start))
-                                   440
-                                   #:fill-color "yellow"
-                                   #:edge-color "none"))
+             (stim-rect (with-fill-color "yellow"
+                          (filled-rect-drawer
+                            (scale-map x-scale stim-start)
+                            80
+                            (- (scale-map x-scale stim-end)
+                               (scale-map x-scale stim-start))
+                            440)))
          
              (x-axis (make-axis-bottom x-scale #:label "Time (ms)"))
              (y-axis (make-axis-left y-scale #:label "Trial"))
              )
     
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "white")
+         (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "white" (filled-rect-drawer 80 80 640 440))
          stim-rect
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          raster
-         (text 400 560 "Neural Spike Raster with geom-eventplot"
-               #:color "black" #:size 15.0)
-         (text 300 540 "Stimulus Period" #:color "orange" #:size 12.0))))
+         (with-pen-color "black"  (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Neural Spike Raster with geom-eventplot")))
+         (with-pen-color "orange" (with-font "sans" 12.0 'normal 'normal
+           (text-drawer 300 540 "Stimulus Period"))))))
     ))
 
 (define (run-example-geom-eventplot)
-  (render example-geom-eventplot
-          (make-png-plotter "example-geom-eventplot.png" 800 600)))
+  (render-to-png example-geom-eventplot "example-geom-eventplot.png" 800 600))
 
 ;;; ========================================================================
 ;;; Combined geometries - points + line + area
@@ -355,20 +358,19 @@
              (y-axis (make-axis-left y-scale #:label "Y Variable")))
         
         (combine
-         (rectangle 0 0 800 600 #:fill-color "white")
-         (rectangle 80 80 640 440 #:fill-color "gray95")
+         (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+         (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
          (with-translate 0 80 (axis-drawer x-axis))
          (with-translate 80 0 (axis-drawer y-axis))
          area-drawer
          line-drawer
          points
-         (text 400 560 "Layered Geometries: Area + Line + Points"
-               #:color "black" #:size 15.0))))
+         (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+           (text-drawer 400 560 "Layered Geometries: Area + Line + Points"))))))
     ))
 
 (define (run-example-combine-geom)
-  (render example-combine-geom
-          (make-png-plotter "example-combine-geom.png" 800 600)))
+  (render-to-png example-combine-geom "example-combine-geom.png" 800 600))
 
 ;;; ========================================================================
 ;;; Run all examples

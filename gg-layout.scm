@@ -58,7 +58,7 @@
           srfi-69
           matchable
           datatype
-          gg-primitives
+          gg-primitives-vge
           gg-scales)
 
 
@@ -74,7 +74,31 @@
     "Safe assq reference with default"
     (or (assq-ref alist key) dflt))
 
-  
+  ;;; ========================================================================
+  ;;; Local bridge: old keyword-arg primitive API -> new VGE drawer combinators
+  ;;; ========================================================================
+
+  (define (text x y str #!key (color "black") (size 10.0))
+    (with-pen-color color
+      (with-font "sans" size 'normal 'normal
+        (text-drawer x y str))))
+
+  (define (rectangle x y w h #!key (fill-color "lightgray") (edge-color "black")
+                               (line-width 1) (alpha 1.0))
+    (with-pen-color edge-color
+      (with-fill-color fill-color
+        (filled-rect-drawer x y w h))))
+
+  (define (line x1 y1 x2 y2 #!key (color "black") (width 1))
+    (with-pen-color color
+      (with-line-width width
+        (line-drawer x1 y1 x2 y2))))
+
+  (define (polygon pts #!key (fill-color "lightgray") (edge-color "black"))
+    (with-pen-color edge-color
+      (with-fill-color fill-color
+        (filled-polygon-drawer pts))))
+
   ;;; ========================================================================
   ;;; Bounding Box Utilities
   ;;; ========================================================================

@@ -4,12 +4,10 @@
         (chicken base)
         (chicken format)
         (chicken string)
-        plot
         gg-plot
-        gg-primitives
         gg-scales
         gg-aes
-        gg-geom)
+        gg-backend-cairo)
 
 ;;; ========================================================================
 ;;; Example 1: Basic Time Series with Layers
@@ -52,11 +50,7 @@
         (labs #:title "Time Series with Confidence Band"
               #:subtitle "Example of layered composition")))
     
-    ;; Create plotter context and render
-    (let ((plotter-ctx (make-png-plotter "ex1-timeseries.png" 800 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex1-timeseries.png" #:width 800 #:height 600)
     (display "Example 1 complete: ex1-timeseries.png\n")))
 
 ;;; ========================================================================
@@ -90,10 +84,7 @@
         (labs #:title "Treatment vs Control"
               #:subtitle "Two experimental conditions")))
     
-    (let ((plotter-ctx (make-png-plotter "ex2-multiseries.png" 800 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex2-multiseries.png" #:width 800 #:height 600)
     (display "Example 2 complete: ex2-multiseries.png\n")))
 
 ;;; ========================================================================
@@ -126,10 +117,7 @@
         (labs #:title "Firing Rates Across Brain Regions"
               #:subtitle "Mean baseline activity")))
     
-    (let ((plotter-ctx (make-png-plotter "ex3-bars.png" 700 500)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex3-bars.png" #:width 700 #:height 500)
     (display "Example 3 complete: ex3-bars.png\n")))
 
 ;;; ========================================================================
@@ -182,10 +170,7 @@
               #:subtitle "Pre vs Post stimulus"
               #:caption "Red line indicates stimulus onset")))
     
-    (let ((plotter-ctx (make-png-plotter "ex4-raster.png" 800 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex4-raster.png" #:width 800 #:height 600)
     (display "Example 4 complete: ex4-raster.png\n")))
 
 ;;; ========================================================================
@@ -224,10 +209,7 @@
         (labs #:title "Power Across Frequency Bands"
               #:subtitle "Region V1")))
     
-    (let ((plotter-ctx (make-png-plotter "ex5-faceted.png" 1200 400)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex5-faceted.png" #:width 1200 #:height 400)
     (display "Example 5 complete: ex5-faceted.png\n")))
 
 ;;; ========================================================================
@@ -257,10 +239,7 @@
         (labs #:title "Dose-Response Curve"
               #:subtitle "Log-log plot")))
     
-    (let ((plotter-ctx (make-png-plotter "ex6-logscale.png" 700 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex6-logscale.png" #:width 700 #:height 600)
     (display "Example 6 complete: ex6-logscale.png\n")))
 
 ;;; ========================================================================
@@ -302,10 +281,7 @@
     (define restored-plot (sexp->plot loaded-sexp))
     
     ;; Render restored plot
-    (let ((plotter-ctx (make-png-plotter "ex7-serialized.png" 700 500)))
-      (render-plot restored-plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave restored-plot "ex7-serialized.png" #:width 700 #:height 500)
     (display "Example 7 complete: ex7-serialized.png\n")
     (display "  Plot specification saved to: plot-spec.scm\n")))
 
@@ -346,10 +322,7 @@
     ;; Generate plot with selected variables
     (define plot (make-comparison-plot '(var1 var2 var3)))
     
-    (let ((plotter-ctx (make-png-plotter "ex8-programmatic.png" 800 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex8-programmatic.png" #:width 800 #:height 600)
     (display "Example 8 complete: ex8-programmatic.png\n")))
 
 ;;; ========================================================================
@@ -386,10 +359,7 @@
         (labs #:title "Gradient Color Mapping"
               #:subtitle "Blue (low) to Red (high)")))
     
-    (let ((plotter-ctx (make-png-plotter "ex9-gradient.png" 600 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex9-gradient.png" #:width 600 #:height 600)
     (display "Example 9 complete: ex9-gradient.png\n")))
 
 ;;; ========================================================================
@@ -447,10 +417,7 @@
               #:subtitle "LFP with spike rate overlay"
               #:caption "Yellow region indicates stimulus period")))
     
-    (let ((plotter-ctx (make-png-plotter "ex10-complete.png" 900 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx)))
-    
+    (ggsave plot "ex10-complete.png" #:width 900 #:height 600)
     (display "Example 10 complete: ex10-complete.png\n")))
 
 ;;; ========================================================================
@@ -475,20 +442,14 @@
         (labs #:title "Multi-Format Output")))
     
     ;; SVG output
-    (let ((svg-ctx (make-svg-plotter "ex11-output.svg" 600 400)))
-      (render-plot plot svg-ctx)
-      (delete-plotter (plotter-context-plotter svg-ctx)))
-    
+    (render-plot plot (make-cairo-svg-backend "ex11-output.svg" 600 400))
+
     ;; PostScript output
-    (let ((ps-ctx (make-ps-plotter "ex11-output.ps" 600 400)))
-      (render-plot plot ps-ctx)
-      (delete-plotter (plotter-context-plotter ps-ctx)))
-    
-    ;; PNG output (high resolution)
-    (let ((png-ctx (make-png-plotter "ex11-output-hires.png" 600 400 4)))
-      (render-plot plot png-ctx)
-      (delete-plotter (plotter-context-plotter png-ctx)))
-    
+    (render-plot plot (make-cairo-ps-backend "ex11-output.ps" 600 400))
+
+    ;; PNG output (high resolution: 4× pixel dimensions)
+    (ggsave plot "ex11-output-hires.png" #:width 2400 #:height 1600)
+
     (display "Example 11 complete: SVG, PS, and high-res PNG outputs\n")))
 
 ;;; ========================================================================

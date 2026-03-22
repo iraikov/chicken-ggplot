@@ -2,23 +2,57 @@
 ((synopsis "A declarative plotting system based on Grammar of Graphics.")
  (license "GPL-3")
  (category graphics)
- (dependencies srfi-1 datatype matchable statistics plot)
+ (cond-expand
+  [libplot (dependencies srfi-1 datatype matchable statistics cairo plot)]
+  [else (dependencies srfi-1 datatype matchable statistics cairo)])
  (author "Ivan Raikov")
- (components (extension gg-primitives
+ (components 
+             (extension gg-backend
                         (csc-options "-O3" "-d1"))
+             (extension gg-backend-cairo
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies gg-backend))
+             (cond-expand
+              [libplot (extension gg-backend-libplot
+                                  (csc-options "-O3" "-d1")
+                                  (component-dependencies gg-backend))]
+              (else))
+             (extension gg-vge
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-backend))
+             (extension gg-primitives-vge
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-backend gg-vge))
              (extension gg-scales
                         (csc-options "-O3" "-d1"))
              (extension gg-guides
-                        (csc-options "-O3" "-d1"))
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-scales gg-primitives-vge))
              (extension gg-aes
                         (csc-options "-O3" "-d1"))
              (extension gg-data
                         (csc-options "-O3" "-d1"))
              (extension gg-geom
-                        (csc-options "-O3" "-d1"))
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-primitives-vge gg-scales gg-data gg-aes))
              (extension gg-layout
-                        (csc-options "-O3" "-d1"))
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-primitives-vge gg-scales))
              (extension gg-plot
-                        (csc-options "-O3" "-d1"))
+                        (csc-options "-O3" "-d1")
+                        (component-dependencies
+                         gg-primitives-vge
+                         gg-scales
+                         gg-data
+                         gg-aes
+                         gg-geom
+                         gg-guides
+                         gg-layout)
+                        )
              )
  )

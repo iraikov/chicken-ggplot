@@ -23,8 +23,43 @@
           (chicken format)
           yasos
           srfi-1
-          gg-primitives
+          gg-backend
+          gg-primitives-vge
           gg-scales)
+
+  ;;; -----------------------------------------------------------------------
+  ;;; Bridge wrappers: translate old gg-primitives call conventions to the
+  ;;; new VGE-based gg-primitives-vge API.
+  ;;; -----------------------------------------------------------------------
+
+  (define (line x1 y1 x2 y2 #!key (color "black") (width 1))
+    (with-pen-color color
+      (with-line-width (exact->inexact width)
+        (line-drawer (exact->inexact x1) (exact->inexact y1)
+                     (exact->inexact x2) (exact->inexact y2)))))
+
+  ;; #:hjust 'left  -> right-align (right edge at x, for left-axis labels)
+  ;; #:hjust 'right -> left-align  (left edge at x, for right-axis labels)
+  ;; default        -> center-align
+  (define (text x y str #!key (color "black") (size 10.0) (hjust 'center))
+    (with-pen-color color
+      (with-font "sans" (exact->inexact size) 'normal 'normal
+        (text-drawer (exact->inexact x) (exact->inexact y) str
+                     #:halign (case hjust
+                                ((left)  halign/right)
+                                ((right) halign/left)
+                                (else    halign/center))
+                     #:valign valign/center))))
+
+  (define (rectangle x y w h #!key (fill-color "lightgray") (edge-color "black"))
+    (filled-rect+border-drawer (exact->inexact x) (exact->inexact y)
+                               (exact->inexact w) (exact->inexact h)
+                               fill-color edge-color))
+
+  ;; VGE has no rotation transform; render child unrotated.
+  ;; Axis titles on vertical axes will appear horizontally — a known
+  ;; limitation until VGE gains a gfx:rotate instruction.
+  (define (with-rotate angle drawer) drawer)
 
   ;;; ========================================================================
   ;;; Axis Abstraction

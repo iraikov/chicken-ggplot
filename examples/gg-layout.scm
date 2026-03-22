@@ -8,20 +8,14 @@
         (chicken format)
         (chicken sort)
         (chicken random)
-        yasos
-        plot
         srfi-1
         srfi-13
-        matchable
-        datatype
-        gg-primitives
         gg-scales
         gg-aes
         gg-geom
-        gg-guides
         gg-plot
         gg-layout
-        gg-plot)
+        gg-backend-cairo)
 
 
 
@@ -504,18 +498,11 @@
 
 (define (render-all-examples)
   "Render all example plots to PNG files"
-  (render-plot spike-raster-example
-               (make-png-plotter "spike-raster.png" 800 600))
-  (render-plot volcano-plot-example
-               (make-png-plotter "volcano-plot.png" 1000 800))
-  (render-plot calibration-plot-example
-               (make-png-plotter "calibration.png" 700 700))
-  (render-plot eeg-timefreq-example
-               (make-png-plotter "eeg-timefreq.png" 1000 600))
-  (render-plot boxplot-comparison-example
-               (make-png-plotter "boxplot-comparison.png" 900 700))
-  (render-plot pca-biplot-example
-               (make-png-plotter "pca-biplot.png" 800 800))
-  )
+  (ggsave spike-raster-example      "spike-raster.png"       #:width  800 #:height 600)
+  (ggsave volcano-plot-example      "volcano-plot.png"       #:width 1000 #:height 800)
+  (ggsave calibration-plot-example  "calibration.png"        #:width  700 #:height 700)
+  (ggsave eeg-timefreq-example      "eeg-timefreq.png"       #:width 1000 #:height 600)
+  (ggsave boxplot-comparison-example "boxplot-comparison.png" #:width  900 #:height 700)
+  (ggsave pca-biplot-example        "pca-biplot.png"         #:width  800 #:height 800))
 
 (render-all-examples)

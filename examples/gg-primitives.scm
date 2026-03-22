@@ -1,11 +1,27 @@
 ;;;; gg-primitives-examples.scm
-;;;; Examples demonstrating basic drawing primitives
+;;;; Examples demonstrating VGE-based drawing primitives (gg-primitives-vge)
 
 (import scheme
         (chicken base)
         (chicken random)
-        gg-primitives
+        gg-primitives-vge
+        gg-vge
+        gg-backend-cairo
+        gg-backend    ; for path:move-to, path:curve-to, halign/center, valign/center
         srfi-1)
+
+;;; Local render helpers
+(define (render-to-png drawer filename width height)
+  (let* ((backend (make-cairo-png-backend filename width height))
+         (vge     (make-vge)))
+    (render-drawer drawer vge)
+    (vge-render! vge backend)))
+
+(define (render-to-svg drawer filename width height)
+  (let* ((backend (make-cairo-svg-backend filename width height))
+         (vge     (make-vge)))
+    (render-drawer drawer vge)
+    (vge-render! vge backend)))
 
 ;;; ========================================================================
 ;;; Basic shapes and composition
@@ -14,78 +30,82 @@
 (define example-basic-shapes
   ;; basic shape primitives and combine
   (combine
-   
+
    ;; Background
-   (rectangle 0 0 800 600 #:fill-color "white")
-   
+   (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+
    ;; Filled circle
-   (circle 200 200 50 
-           #:fill-color "red" )
-           ;#:edge-color "navy" 
-           ;#:line-width 2)
-   
-   ;; Line with style
-   (line 100 100 700 500 
-         #:color "red" 
-         #:width 3 
-         #:style 'dashed)
-   
-   ;; Polygon
-   (polygon '((400 . 100) (500 . 150) (450 . 250) (350 . 200))
-            #:fill-color "lightgreen"
-            #:edge-color "darkgreen"
-            #:width 1.5)
-   
-   ;; Text
-   (text 400 50 "Primitives Demo"
-         #:color "black"
-         #:size 12.0)
-   
+   (with-fill-color "red"
+     (filled-circle-drawer 200 200 50))
+
+   ;; Line with dashed style
+   (with-pen-color "red"
+     (with-line-width 3
+       (with-dash '(10.0 5.0) 0.0
+         (line-drawer 100 100 700 500))))
+
+   ;; Polygon (filled + border)
+   (with-fill-color "lightgreen"
+     (with-pen-color "darkgreen"
+       (with-line-width 1.5
+         (filled-polygon-drawer '((400 . 100) (500 . 150) (450 . 250) (350 . 200))))))
+
+   ;; Text title
+   (with-pen-color "black"
+     (with-font "sans" 12.0 'normal 'normal
+       (text-drawer 400 50 "Primitives Demo")))
    ))
 
 ;; Render to PNG
 (define (run-example-basic-shapes)
-  (render example-basic-shapes
-          (make-png-plotter "example-basic-shapes.png" 800 600)))
+  (render-to-png example-basic-shapes "example-basic-shapes.png" 800 600))
 
 ;;; ========================================================================
 ;;; Style combinators
 ;;; ========================================================================
 
 (define example-style-transform
-  ;; style transformation
-  (let ((base-circle (circle 0 0 30 #:fill-color "orange")))
+  ;; style transformation — showing styled circles and shapes
+  (let ((base-circle (with-fill-color "orange"
+                       (filled-circle-drawer 0 0 30))))
     (combine
      ;; Background
-     (rectangle 0 0 800 600 #:fill-color "white")
-     
+     (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+
      ;; Original at center
      (with-translate 400 300 base-circle)
-     
-     ;; Translated copies with different styles
+
+     ;; Translated: outlined circle (blue pen, no fill)
      (with-translate 200 300
        (with-pen-color "blue"
-         (circle 0 0 30 #:edge-color "blue" #:line-width 2)))
-     
+         (with-line-width 2
+           (circle-drawer 0 0 30))))
+
+     ;; Translated: outlined circle (red, thicker)
      (with-translate 600 300
-       (with-line-width 4
-         (circle 0 0 30 #:edge-color "red")))
-     
-     ;; Scaled version
+       (with-pen-color "red"
+         (with-line-width 4
+           (circle-drawer 0 0 30))))
+
+     ;; Manually "scaled" version: larger circle (radius 45 = 30 * 1.5)
      (with-translate 400 150
-       (with-scale 1.5 1.5 base-circle))
-     
-     ;; Rotated rectangle
+       (with-fill-color "orange"
+         (filled-circle-drawer 0 0 45)))
+
+     ;; Diamond polygon in place of the rotated rectangle
      (with-translate 400 450
-       (with-rotate (/ 3.14159 4)  ; 45 degrees
-         (rectangle -40 -20 80 40
-                    #:fill-color "purple"
-                    #:edge-color "white"
-                    #:line-width 2))))))
+       (with-fill-color "purple"
+         (with-pen-color "white"
+           (with-line-width 2
+             (filled-polygon-drawer
+               '(( 0 . -28)   ; top
+                 (40 .   0)   ; right
+                 ( 0 .  28)   ; bottom
+                 (-40 .  0))))))) ; left
+     )))
 
 (define (run-example-style-transform)
-  (render example-style-transform
-          (make-png-plotter "example-style-transform.png" 800 600)))
+  (render-to-png example-style-transform "example-style-transform.png" 800 600))
 
 ;;; ========================================================================
 ;;; Functional composition - grid of shapes
@@ -97,7 +117,7 @@
          (append-map
           (lambda (row)
             (map (lambda (col)
-                   (with-translate (* col cell-width) 
+                   (with-translate (* col cell-width)
                                    (* row cell-height)
                      cell-drawer))
                  (iota cols)))
@@ -106,16 +126,21 @@
 (define example-grid-of-shapes
   ; Grid of shapes demonstrating reusability
   (let ((cell (combine
-               (circle 25 25 20 #:fill-color "lightblue")
-               (circle 25 25 20 #:edge-color "darkblue" #:line-width 1.5)
-               (text-centered 25 25 "S" #:color "navy" #:size 15.0))))
+               (with-fill-color "lightblue"
+                 (filled-circle-drawer 25 25 20))
+               (with-pen-color "darkblue"
+                 (circle-drawer 25 25 20))
+               (with-pen-color "navy"
+                 (with-font "sans" 15.0 'normal 'normal
+                   (text-drawer 25 25 "S"
+                                #:halign halign/center
+                                #:valign valign/center))))))
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
+     (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
      (make-grid 4 6 130 130 cell))))
 
 (define (run-example-grid-of-shapes)
-  (render example-grid-of-shapes
-          (make-svg-plotter "example-grid-of-shapes.svg" 800 600)))
+  (render-to-svg example-grid-of-shapes "example-grid-of-shapes.svg" 800 600))
 
 ;;; ========================================================================
 ;;; Polyline and curves
@@ -130,90 +155,93 @@
          (iota (+ steps 1)))))
 
 (define example-polylines
-  ;; polylines and Bezier curves
+  ;; polylines and cubic Bezier curves
   (combine
    ;; Background
-   (rectangle 0 0 800 600 #:fill-color "white")
-   
-   ;; Sine wave
-   (polyline (generate-sine-wave 50 750 100 50)
-             #:color "blue"
-             #:width 2)
-   
-   ;; Bezier curve
-   (bezier 100 500 200 550 600 400 700 500
-           #:color "red"
-           #:width 2)
-   
-   ;; Control points for Bezier
-   (circle 100 500 5 #:fill-color "red")
-   (circle 200 550 5 #:fill-color "red")
-   (circle 600 400 5 #:fill-color "red")
-   (circle 700 500 5 #:fill-color "red")
-   
+   (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+
+   ;; Sine wave as polyline
+   (with-pen-color "blue"
+     (with-line-width 2
+       (polyline-drawer (generate-sine-wave 50 750 100 50))))
+
+   ;; Cubic Bezier curve via path-drawer
+   (with-pen-color "red"
+     (with-line-width 2
+       (path-drawer
+         (list (path:move-to 100.0 500.0)
+               (path:curve-to 200.0 550.0 600.0 400.0 700.0 500.0)))))
+
+   ;; Control-point markers
+   (with-fill-color "red" (filled-circle-drawer 100 500 5))
+   (with-fill-color "red" (filled-circle-drawer 200 550 5))
+   (with-fill-color "red" (filled-circle-drawer 600 400 5))
+   (with-fill-color "red" (filled-circle-drawer 700 500 5))
+
    ;; Labels
-   (text 50 250 "Sine Wave" #:color "blue" #:size 12.0)
-   (text 50 450 "Bezier Curve" #:color "red" #:size 12.0)))
+   (with-pen-color "blue"  (with-font "sans" 12.0 'normal 'normal (text-drawer  50 250 "Sine Wave")))
+   (with-pen-color "red"   (with-font "sans" 12.0 'normal 'normal (text-drawer  50 450 "Bezier Curve")))))
 
 (define (run-example-polylines)
-  (render example-polylines
-          (make-png-plotter "example-polylines.png" 800 600)))
+  (render-to-png example-polylines "example-polylines.png" 800 600))
 
 ;;; ========================================================================
 ;;; Simple plot-like visualization
 ;;; ========================================================================
 
-(define (scatter-plot points x-min x-max y-min y-max 
+(define (scatter-plot points x-min x-max y-min y-max
                       width height margin)
   "Create a simple scatter plot from data points"
-  (let* ((plot-width (- width (* 2 margin)))
+  (let* ((plot-width  (- width  (* 2 margin)))
          (plot-height (- height (* 2 margin)))
-         (x-scale (lambda (x) 
-                    (+ margin (* plot-width 
+         (x-scale (lambda (x)
+                    (+ margin (* plot-width
                                  (/ (- x x-min) (- x-max x-min))))))
-         (y-scale (lambda (y) 
-                    (+ margin (* plot-height 
+         (y-scale (lambda (y)
+                    (+ margin (* plot-height
                                  (/ (- y y-min) (- y-max y-min)))))))
-    
+
     (combine
      ;; Background
-     (rectangle 0 0 width height #:fill-color "white")
-     
+     (with-fill-color "white" (filled-rect-drawer 0 0 width height))
+
      ;; Plot area background
-     (rectangle margin margin plot-width plot-height
-                #:fill-color "gray95")
-     
+     (with-fill-color "gray95" (filled-rect-drawer margin margin plot-width plot-height))
+
      ;; Axes
-     (line margin margin margin (+ margin plot-height)
-           #:color "black" #:width 2)
-     (line margin margin (+ margin plot-width) margin
-           #:color "black" #:width 2)
-     
+     (with-pen-color "black"
+       (with-line-width 2
+         (combine
+           (line-drawer margin margin margin (+ margin plot-height))
+           (line-drawer margin margin (+ margin plot-width) margin))))
+
      ;; Data points
      (apply combine
             (map (lambda (pt)
-                   (circle (x-scale (car pt)) 
-                           (y-scale (cdr pt))
-                           4
-                           #:fill-color "steelblue"
-                           #:edge-color "navy"))
+                   (combine
+                     (with-fill-color "steelblue"
+                       (filled-circle-drawer (x-scale (car pt)) (y-scale (cdr pt)) 4))
+                     (with-pen-color "navy"
+                       (circle-drawer (x-scale (car pt)) (y-scale (cdr pt)) 4))))
                  points))
-     
+
      ;; Axis labels
-     (text (+ margin (/ plot-width 2)) 10 "X Axis"
-           #:color "black" #:size 12.0)
-     (text 20 (+ margin (/ plot-height 2)) "Y Axis"
-           #:color "black" #:size 12.0))))
+     (with-pen-color "black"
+       (with-font "sans" 12.0 'normal 'normal
+         (combine
+           (text-drawer (+ margin (/ plot-width 2)) 10 "X Axis"
+                        #:halign halign/center)
+           (text-drawer 20 (+ margin (/ plot-height 2)) "Y Axis"
+                        #:halign halign/center)))))))
 
 (define example-simple-scatter-plot
   ; scatter plot demonstration
-  (let ((data '((1 . 2.3) (2 . 4.1) (3 . 3.5) (4 . 5.8) 
+  (let ((data '((1 . 2.3) (2 . 4.1) (3 . 3.5) (4 . 5.8)
                 (5 . 5.2) (6 . 7.1) (7 . 6.8) (8 . 8.2))))
     (scatter-plot data 0 10 0 10 800 600 50)))
 
 (define (run-example-simple-scatter-plot)
-  (render example-simple-scatter-plot
-          (make-png-plotter "example-simple-scatter-plot.png" 800 600)))
+  (render-to-png example-simple-scatter-plot "example-simple-scatter-plot.png" 800 600))
 
 ;;; ========================================================================
 ;;; Neuroscience-inspired - Spike raster pattern
@@ -227,44 +255,44 @@
                       (spike-times (spike-times-fn trial)))
                   (apply combine
                          (map (lambda (t)
-                                (line t (- y (/ spike-height 2))
-                                      t (+ y (/ spike-height 2))
-                                      #:color "black"
-                                      #:width 1))
+                                (with-pen-color "black"
+                                  (with-line-width 1
+                                    (line-drawer t (- y (/ spike-height 2))
+                                                 t (+ y (/ spike-height 2))))))
                               spike-times))))
               (iota trial-count))))
 
 (define example-spike-raster
-  ; Neiron spike raster
-  (let ((random-spikes 
+  ; Neural spike raster
+  (let ((random-spikes
          (lambda (trial)
            ;; Generate pseudo-random spike times
            (filter (lambda (t) (< (pseudo-random-integer 100) 30))
                    (iota 100)))))
     (combine
      ;; Background
-     (rectangle 0 0 800 600 #:fill-color "white")
-     
+     (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+
      ;; Stimulus period marker
-     (rectangle 200 50 100 500 
-                #:fill-color "yellow" 
-                #:edge-color "none")
-     
+     (with-fill-color "yellow"
+       (filled-rect-drawer 200 50 100 500))
+
      ;; Spike rasters
      (with-translate 50 50
        (spike-raster 20 random-spikes 0 25 20))
-     
-     ;; Axis
-     (line 50 575 750 575 #:color "black" #:width 2)
-     
+
+     ;; Axis line at bottom (Y-up: small y = near bottom of canvas)
+     (with-pen-color "black"
+       (with-line-width 2
+         (line-drawer 50 25 750 25)))
+
      ;; Labels
-     (text 400 590 "Time (ms)" #:color "black" #:size 12.0)
-     (text 20 300 "Trials" #:color "black" #:size 12.0)
-     (text 300 20 "Stimulus" #:color "orange" #:size 10.0))))
+     (with-pen-color "black"  (with-font "sans" 12.0 'normal 'normal (text-drawer 400  10 "Time (ms)" #:halign halign/center)))
+     (with-pen-color "black"  (with-font "sans" 12.0 'normal 'normal (text-drawer  20 300 "Trials")))
+     (with-pen-color "orange" (with-font "sans" 10.0 'normal 'normal (text-drawer 300 570 "Stimulus"))))))
 
 (define (run-example-spike-raster)
-  (render example-spike-raster
-          (make-png-plotter "example-spike-raster.png" 800 600)))
+  (render-to-png example-spike-raster "example-spike-raster.png" 800 600))
 
 ;;; ========================================================================
 ;;; Complex composition - Dashboard layout
@@ -274,17 +302,17 @@
   "Create a titled panel containing a drawer"
   (combine
    ;; Panel background
-   (rectangle x y width height
-              #:fill-color "white"
-              #:edge-color "gray"
-              #:line-width 1)
+   (with-fill-color "white"
+     (with-pen-color "gray"
+       (with-line-width 1
+         (filled-rect-drawer x y width height))))
    ;; Title bar
-   (rectangle x (+ y height -25) width 25
-              #:fill-color "lightgray")
+   (with-fill-color "lightgray"
+     (filled-rect-drawer x (+ y height -25) width 25))
    ;; Title text
-   (text (+ x 80) (+ y height -10) title
-         #:color "black"
-         #:size 12.0)
+   (with-pen-color "black"
+     (with-font "sans" 12.0 'normal 'normal
+       (text-drawer (+ x 80) (+ y height -10) title)))
    ;; Content with proper translation
    (with-translate x y drawer)))
 
@@ -292,41 +320,44 @@
   ; Multi-panel dashboard layout
   (combine
    ;; Background
-   (rectangle 0 0 1200 800 #:fill-color "whitesmoke")
-   
+   (with-fill-color "whitesmoke" (filled-rect-drawer 0 0 1200 800))
+
    ;; Panel 1: Circle
    (panel 20 20 350 350 "Panel 1: Geometry"
-          (circle 175 175 100 
-                  #:fill-color "coral"
-                  #:edge-color "darkred"
-                  #:line-width 2))
-   
+          (with-fill-color "coral"
+            (with-pen-color "darkred"
+              (with-line-width 2
+                (combine
+                  (filled-circle-drawer 175 175 100)
+                  (circle-drawer 175 175 100))))))
+
    ;; Panel 2: Line chart
    (panel 390 20 350 350 "Panel 2: Time Series"
-          (polyline (generate-sine-wave 20 330 50 100)
-                    #:color "steelblue"
-                    #:width 2))
-   
+          (with-pen-color "steelblue"
+            (with-line-width 2
+              (polyline-drawer (generate-sine-wave 20 330 50 100)))))
+
    ;; Panel 3: Grid pattern
    (panel 760 20 420 350 "Panel 3: Pattern"
           (make-grid 4 6 70 70
-                     (circle 35 35 25
-                             #:fill-color "lightgreen"
-                             #:edge-color "darkgreen")))
-   
+                     (combine
+                       (with-fill-color "lightgreen"
+                         (filled-circle-drawer 35 35 25))
+                       (with-pen-color "darkgreen"
+                         (circle-drawer 35 35 25)))))
+
    ;; Panel 4: Text and labels
    (panel 20 390 560 390 "Panel 4: Annotations"
           (combine
-           (text 120 200 "Large text label"
-                 #:color "navy"
-                 #:size 25.0)
-           (text 80 100 "Smaller annotation"
-                 #:color "gray"
-                 #:size 12.0)))))
+           (with-pen-color "navy"
+             (with-font "sans" 25.0 'normal 'normal
+               (text-drawer 120 200 "Large text label")))
+           (with-pen-color "gray"
+             (with-font "sans" 12.0 'normal 'normal
+               (text-drawer 80 100 "Smaller annotation")))))))
 
 (define (run-example-multi-panel)
-  (render example-multi-panel
-          (make-png-plotter "example-multi-panel.png" 1200 800)))
+  (render-to-png example-multi-panel "example-multi-panel.png" 1200 800))
 
 ;;; ========================================================================
 ;;; Run all examples
@@ -339,7 +370,6 @@
   (run-example-polylines)
   (run-example-simple-scatter-plot)
   (run-example-spike-raster)
-  (run-example-multi-panel)
-  )
+  (run-example-multi-panel))
 
 (run-all-examples)

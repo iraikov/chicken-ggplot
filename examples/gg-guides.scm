@@ -5,10 +5,19 @@
         (chicken base)
         (chicken format)
         (chicken random)
-        gg-primitives
+        gg-primitives-vge
+        gg-vge
+        gg-backend-cairo
         gg-scales
         gg-guides
         srfi-1)
+
+;;; Local render helper
+(define (render-to-png drawer filename width height)
+  (let* ((backend (make-cairo-png-backend filename width height))
+         (vge     (make-vge)))
+    (render-drawer drawer vge)
+    (vge-render! vge backend)))
 
 ;;; ========================================================================
 ;;; Linear scale with axes
@@ -40,19 +49,21 @@
          ;; Plot data points
          (points (apply combine
                         (map (lambda (x y)
-                               (circle (scale-map x-scale x)
-                                       (scale-map y-scale y)
-                                       5
-                                       #:fill-color "steelblue"
-                                       #:edge-color "navy"))
+                               (combine
+                                 (with-fill-color "steelblue"
+                                   (filled-circle-drawer (scale-map x-scale x)
+                                                         (scale-map y-scale y) 5))
+                                 (with-pen-color "navy"
+                                   (circle-drawer (scale-map x-scale x)
+                                                  (scale-map y-scale y) 5))))
                              x-data y-data))))
     
     (combine
      ;; Background
-     (rectangle 0 0 800 600 #:fill-color "white")
-     
+     (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+
      ;; Plot area background
-     (rectangle 80 80 640 440 #:fill-color "gray95")
+     (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
      
      ;; Axes
      (with-translate 0 80 (axis-drawer x-axis))
@@ -62,12 +73,12 @@
      points
      
      ;; Title
-     (text 400 560 "Linear Scale Example"
-           #:color "black" #:size 15.0))))
+     (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+       (text-drawer 400 560 "Linear Scale Example")))))
+  )
 
 (define (run-example-linear-scale)
-  (render example-linear-scale
-          (make-png-plotter "example-linear-scale.png" 800 600)))
+  (render-to-png example-linear-scale "example-linear-scale.png" 800 600))
 
 ;;; ========================================================================
 ;;; Logarithmic scale
@@ -94,26 +105,26 @@
          (y-axis (make-axis-left y-scale #:label "Population (log scale)" #:tick-count 4))
          
          ;; Plot line
-         (data-line (polyline 
-                     (map (lambda (x y)
-                            (cons (scale-map x-scale x)
-                                  (scale-map y-scale y)))
-                          x-data y-data)
-                     #:color "red"
-                     #:width 2)))
+         (data-line (with-pen-color "red"
+                      (with-line-width 2
+                        (polyline-drawer
+                          (map (lambda (x y)
+                                 (cons (scale-map x-scale x)
+                                       (scale-map y-scale y)))
+                               x-data y-data))))))
     
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
-     (rectangle 80 80 640 440 #:fill-color "gray95")
+     (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+     (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
      (with-translate 0 80 (axis-drawer x-axis))
      (with-translate 80 0 (axis-drawer y-axis))
      data-line
-     (text 400 560 "Logarithmic Scale Example"
-           #:color "black" #:size 15.0))))
+     (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+       (text-drawer 400 560 "Logarithmic Scale Example")))))
+  )
 
 (define (run-example-log-scale)
-  (render example-log-scale
-          (make-png-plotter "example-log-scale.png" 800 600)))
+  (render-to-png example-log-scale "example-log-scale.png" 800 600))
 
 ;;; ========================================================================
 ;;; Ordinal scale (categorical data)
@@ -146,24 +157,23 @@
                                    (y0 (scale-map y-scale 12))
                                    (y1 (scale-map y-scale val))
                                    (w 50))
-                               (rectangle (- x (/ w 2)) y0 w (- y1 y0)
-                                         #:fill-color "coral"
-                                         #:edge-color "darkred"
-                                         #:line-width 1)))
+                               (with-line-width 1
+                                 (filled-rect+border-drawer
+                                   (- x (/ w 2)) y0 w (- y1 y0)
+                                   "coral" "darkred"))))
                            categories values))))
     
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
-     (rectangle 80 80 640 440 #:fill-color "gray95")
+     (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+     (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
      (with-translate 0 80 (axis-drawer x-axis))
      (with-translate 80 0 (axis-drawer y-axis))
      bars
-     (text 400 560 "Ordinal (Categorical) Scale Example"
-           #:color "black" #:size 15.0))))
-
+     (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+       (text-drawer 400 560 "Ordinal (Categorical) Scale Example")))))
+)
 (define (run-example-ordinal-scale)
-  (render example-ordinal-scale
-          (make-png-plotter "example-ordinal-scale.png" 800 600)))
+  (render-to-png example-ordinal-scale "example-ordinal-scale.png" 800 600))
 
 ;;; ========================================================================
 ;;; Multiple axes (dual y-axis)
@@ -196,39 +206,35 @@
          (y2-axis (make-axis-right y2-scale #:label "Humidity (%)"))
          
          ;; Plot lines
-         (temp-line (polyline 
-                     (map (lambda (x y)
-                            (cons (scale-map x-scale x)
-                                  (scale-map y1-scale y)))
-                          x-data y1-data)
-                     #:color "red"
-                     #:width 2))
-         
-         (humidity-line (polyline 
-                         (map (lambda (x y)
-                                (cons (scale-map x-scale x)
-                                      (scale-map y2-scale y)))
-                              x-data y2-data)
-                         #:color "blue"
-                         #:width 2)))
+         (temp-line
+          (with-pen-color "red" (with-line-width 2
+            (polyline-drawer
+              (map (lambda (x y)
+                     (cons (scale-map x-scale x) (scale-map y1-scale y)))
+                   x-data y1-data)))))
+
+         (humidity-line
+          (with-pen-color "blue" (with-line-width 2
+            (polyline-drawer
+              (map (lambda (x y)
+                     (cons (scale-map x-scale x) (scale-map y2-scale y)))
+                   x-data y2-data))))))
     
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
-     (rectangle 80 80 640 440 #:fill-color "gray95")
+     (with-fill-color "white"  (filled-rect-drawer 0 0 800 600))
+     (with-fill-color "gray95" (filled-rect-drawer 80 80 640 440))
      (with-translate 0 80 (axis-drawer x-axis))
      (with-translate 80 0 (axis-drawer y1-axis))
      (with-translate 720 0 (axis-drawer y2-axis))
      temp-line
      humidity-line
      ;; Legend
-     (text 100 550 "Temperature" #:color "red" #:size 10.0)
-     (text 250 550 "Humidity" #:color "blue" #:size 10.0)
-     (text 400 570 "Dual Y-Axis Example"
-           #:color "black" #:size 15.0))))
-
+     (with-pen-color "red"   (with-font "sans" 10.0 'normal 'normal (text-drawer 100 550 "Temperature")))
+     (with-pen-color "blue"  (with-font "sans" 10.0 'normal 'normal (text-drawer 250 550 "Humidity")))
+     (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal (text-drawer 400 570 "Dual Y-Axis Example")))))
+)
 (define (run-example-multiple-axes)
-  (render example-multiple-axes
-          (make-png-plotter "example-multiple-axes.png" 800 600)))
+  (render-to-png example-multiple-axes "example-multiple-axes.png" 800 600))
 
 ;;; ========================================================================
 ;;; Neuroscience application - firing rate over time
@@ -267,37 +273,35 @@
          
          ;; Stimulus period marker
          (stimulus-marker
-          (rectangle (scale-map x-scale 30) 
-                     (scale-map y-scale (car (scale-domain y-scale)))
-                     (- (scale-map x-scale 60) (scale-map x-scale 30))
-                     (- (scale-map y-scale (cdr (scale-domain y-scale)))
-                        (scale-map y-scale (car (scale-domain y-scale))))
-                     #:fill-color "yellow"
-                     #:edge-color "none"))
-         
+          (with-fill-color "yellow"
+            (filled-rect-drawer
+              (scale-map x-scale 30)
+              (scale-map y-scale (car (scale-domain y-scale)))
+              (- (scale-map x-scale 60) (scale-map x-scale 30))
+              (- (scale-map y-scale (cdr (scale-domain y-scale)))
+                 (scale-map y-scale (car (scale-domain y-scale)))))))
+
          ;; Plot line
-         (data-line (polyline 
-                     (map (lambda (t fr)
-                            (cons (scale-map x-scale t)
-                                  (scale-map y-scale fr)))
-                          time-points firing-rates)
-                     #:color "darkblue"
-                     #:width 2)))
+         (data-line
+          (with-pen-color "darkblue" (with-line-width 2
+            (polyline-drawer
+              (map (lambda (t fr)
+                     (cons (scale-map x-scale t) (scale-map y-scale fr)))
+                   time-points firing-rates))))))
     
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
-     (rectangle 80 80 640 440 #:fill-color "white")
+     (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+     (with-fill-color "white" (filled-rect-drawer 80 80 640 440))
      stimulus-marker
      (with-translate 0 80 (axis-drawer x-axis))
      (with-translate 80 0 (axis-drawer y-axis))
      data-line
-     (text 400 560 "Neural Firing Rate During Stimulus"
-           #:color "black" #:size 15.0)
-     (text 300 540 "Stimulus Period" #:color "orange" #:size 10.0))))
+     (with-pen-color "black"  (with-font "sans" 15.0 'normal 'normal (text-drawer 400 560 "Neural Firing Rate During Stimulus")))
+     (with-pen-color "orange" (with-font "sans" 10.0 'normal 'normal (text-drawer 300 540 "Stimulus Period")))))
+  )
 
 (define (run-example-neuroscience-plots)
-  (render example-neuroscience-plots
-          (make-png-plotter "example-neuroscience-plots.png" 800 600)))
+  (render-to-png example-neuroscience-plots "example-neuroscience-plots.png" 800 600))
 
 ;;; ========================================================================
 ;;; Grid with scales - heatmap-like visualization
@@ -340,27 +344,29 @@
                                         (y (scale-map y-scale row-name))
                                         ;; Grayscale based on value
                                         (gray (inexact->exact (floor (* 255 (- 1 val)))))
-                                        (color (format "#~X~X~X" gray gray gray)))
-                                   (rectangle (- x 60) (- y 40) 120 80
-                                             #:fill-color color
-                                             #:edge-color "white"
-                                             #:line-width 2)))
+                                        (hex2 (lambda (n) (let ((s (number->string n 16)))
+                                                           (if (< n 16) (string-append "0" s) s))))
+                                        (color (string-append "#" (hex2 gray) (hex2 gray) (hex2 gray))))
+                                   (with-line-width 2
+                                     (filled-rect+border-drawer
+                                       (- x 60) (- y 40) 120 80
+                                       color "white"))))
                                cols
                                (iota (length cols))))
                         rows
                         (iota (length rows))))))
     
     (combine
-     (rectangle 0 0 800 600 #:fill-color "white")
+     (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
      cells
      (with-translate 0 80 (axis-drawer x-axis))
      (with-translate 80 0 (axis-drawer y-axis))
-     (text 400 560 "Heatmap Example with Band Scales"
-           #:color "black" #:size 15.0))))
+     (with-pen-color "black" (with-font "sans" 15.0 'normal 'normal
+       (text-drawer 400 560 "Heatmap Example with Band Scales")))))
+  )
 
 (define (run-example-simple-heatmap)
-  (render example-simple-heatmap
-          (make-png-plotter "example-simple-heatmap.png" 800 600)))
+  (render-to-png example-simple-heatmap "example-simple-heatmap.png" 800 600))
 
 ;;; ========================================================================
 ;;; Run all examples

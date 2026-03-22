@@ -5,12 +5,11 @@
         (chicken format)
         (chicken string)
         statistics
-        plot
         gg-plot
-        gg-primitives
         gg-scales
         gg-aes
-        gg-geom)
+        gg-geom
+        gg-backend-cairo)
 
 ;; Test data sets
 (define summary-data 
@@ -117,9 +116,7 @@
 
 (for-each
  (lambda (plot name)
-   (let ((plotter-ctx (make-png-plotter (string-append name ".png") 900 600)))
-      (render-plot plot plotter-ctx)
-      (delete-plotter (plotter-context-plotter plotter-ctx))))
+   (ggsave plot (string-append name ".png") #:width 900 #:height 600))
  (list p1 p2 p2.1 p3 p4 p5 p6 p7 p8)
  (list "p1-errorbar"
        "p2-errorbar"
@@ -129,8 +126,7 @@
        "p5-crossbar"
        "p6-column-chart"
        "p7-pointrange"
-       "p8-horz-errorbar"
-       ))
+       "p8-horz-errorbar"))
 
 
 #|
