@@ -3,8 +3,8 @@
  (license "GPL-3")
  (category graphics)
  (cond-expand
-  [libplot (dependencies srfi-1 datatype matchable statistics cairo plot)]
-  [else (dependencies srfi-1 datatype matchable statistics cairo)])
+  [libplot (dependencies srfi-1 datatype matchable yasos statistics cairo plot)]
+  [else (dependencies srfi-1 datatype matchable yasos statistics cairo)])
  (author "Ivan Raikov")
  (components 
              (extension gg-backend
