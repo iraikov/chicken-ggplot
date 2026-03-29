@@ -1386,41 +1386,23 @@
   ;;; ------------------------------------------------------------------------
   ;;;; Robust fix for eventplot scale training in gg-plot.scm
 
-  (define (flatten-if-nested data)
-    "Flatten data if it's a list of lists of numbers.
-     Used for eventplot spike train data."
-  
-    (cond
-     ;; Empty list - return as-is
-     ((null? data) data)
-     
-     ;; First element is a list - assume nested structure, flatten
-     ((and (list? (car data))
-           (not (null? (car data))))
-      ;; Flatten all sublists
-      (apply append data))
-     
-     ;; First element is not a list - assume flat structure, return as-is
-     (else data)))
-  
-  
-
   (define (train-plot-scales spec)
     "Train scales from all layers' data
-   
+
      Special handling:
      - ymin/ymax aesthetics train the 'y' scale (not separate scales)
      - xmin/xmax aesthetics train the 'x' scale (not separate scales)
-     - For eventplot x aesthetic, flatten nested lists of event times"
-  
+     - For eventplot x aesthetic, column is a collection of event-time collections;
+       each sub-collection is trained individually"
+
     (let ((data (plot-spec-data spec))
           (layers (plot-spec-layers spec))
           (default-aes (plot-spec-default-aes spec))
           (scale-specs (plot-spec-scales spec)))
-      
+
       ;; Initialize empty scale collection
       (let ((scales (make-hash-table)))
-        
+
         ;; Train from each layer
         (for-each
          (lambda (layer)
@@ -1430,40 +1412,43 @@
                   (is-eventplot (eq? layer-geom-name 'eventplot))
                   ;; Skip reference lines - they use parameters, not data
                   (is-reference-line (memq layer-geom-name '(hline vline))))
-             
+
              ;; Only train scales for data-driven geometries
              (unless is-reference-line
-             
+
                ;; Train each mapped aesthetic
                (for-each
                 (lambda (aes-key)
                   (let ((aes-val (aes-get layer-aes aes-key)))
                     (when (and aes-val (symbol? aes-val))
-                      (let* ((col-data-raw (data-column layer-data aes-val))
-                             ;; For eventplot x aesthetic: always try to flatten
-                             ;; The flatten-if-nested function will detect if flattening is needed
-                             (col-data 
-                              (if (and is-eventplot (eq? aes-key 'x))
-                                  (flatten-if-nested col-data-raw)
-                                  col-data-raw)))
-                        
-                        (unless (null? col-data)
-                          
+                      (let ((col-data (data-column layer-data aes-val)))
+
+                        (unless (empty? col-data)
+
                           ;; Map ymin/ymax to 'y' scale, xmin/xmax to 'x' scale
                           (let ((scale-key (case aes-key
                                              ((ymin ymax) 'y)
                                              ((xmin xmax) 'x)
                                              (else aes-key))))
-                            
-                            ;; Get or create scale
-                            (let ((scale (hash-table-ref/default 
-                                          scales scale-key
-                                          (if (number? (car col-data))
-                                              (make-scale-linear)
-                                              (make-scale-band)))))
-                              ;; Train scale with (possibly flattened) data
-                              (scale-train! scale col-data)
-                              (hash-table-set! scales scale-key scale))))))))
+
+                            ;; For eventplot x: col-data is a collection of event-time
+                            ;; collections; create a linear scale and train with each
+                            ;; sub-collection.  For all other columns, detect scale type
+                            ;; from the first element and train directly.
+                            (if (and is-eventplot (eq? aes-key 'x))
+                                (let ((scale (hash-table-ref/default
+                                              scales scale-key (make-scale-linear))))
+                                  (for-each-elt (lambda (subcoll)
+                                                 (scale-train! scale subcoll))
+                                                col-data)
+                                  (hash-table-set! scales scale-key scale))
+                                (let ((scale (hash-table-ref/default
+                                              scales scale-key
+                                              (if (number? (elt-ref col-data 0))
+                                                  (make-scale-linear)
+                                                  (make-scale-band)))))
+                                  (scale-train! scale col-data)
+                                  (hash-table-set! scales scale-key scale)))))))))
                 (aes-keys layer-aes)))))
          (filter layer? layers))
 
@@ -1774,28 +1759,30 @@
     "Return columnar data filtered to rows where col-name equals value."
     (let* ((col-vals (data-column data col-name))
            (indices
-            (let loop ((i 0) (vs col-vals) (acc '()))
-              (if (null? vs)
-                  (reverse acc)
-                  (loop (+ i 1) (cdr vs)
-                        (if (equal? (car vs) value)
-                            (cons i acc)
-                            acc))))))
+            (let ((gen (gen-elts col-vals))
+                  (i 0)
+                  (acc '()))
+              (let loop ()
+                (let ((v (gen)))
+                  (if (eof-object? v)
+                      (reverse acc)
+                      (begin
+                        (when (equal? v value)
+                          (set! acc (cons i acc)))
+                        (set! i (+ i 1))
+                        (loop))))))))
       (map (lambda (col-entry)
              (cons (car col-entry)
-                   (map (lambda (i) (list-ref (cdr col-entry) i))
+                   (map (lambda (i) (elt-ref (cdr col-entry) i))
                         indices)))
            data)))
 
-  (define (unique-ordered lst)
-    "Return unique values from lst, preserving first-occurrence order."
-    (let loop ((remaining lst) (seen '()) (result '()))
-      (if (null? remaining)
-          (reverse result)
-          (let ((v (car remaining)))
-            (if (member v seen)
-                (loop (cdr remaining) seen result)
-                (loop (cdr remaining) (cons v seen) (cons v result)))))))
+  (define (unique-ordered coll)
+    "Return list of unique values from a collection, preserving first-occurrence order."
+    (reverse (reduce (lambda (v acc)
+                       (if (member v acc) acc (cons v acc)))
+                     '()
+                     coll)))
 
   (define (compute-wrap-panels spec scales props width height)
     "Compute panels for facet-wrap"

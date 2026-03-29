@@ -56,6 +56,7 @@
           (chicken base)
           (chicken format)
           yasos
+          yasos-collections
           srfi-1
           srfi-69)  ; Hash tables for ordinal scales
 
@@ -164,9 +165,9 @@
        
        ;; Training: extend domain to include new values
        ((scale-train! self values)
-        (when (not (null? values))
-          (let ((min-val (apply min values))
-                (max-val (apply max values)))
+        (when (not (empty? values))
+          (let ((min-val (reduce min +inf.0 values))
+                (max-val (reduce max -inf.0 values)))
             (if domain
                 (set! domain 
                       (cons (min (car domain) min-val)
@@ -341,18 +342,18 @@
        
        ((scale-train! self values)
         ;; Add new domain values not yet seen
-        (for-each (lambda (v)
-                    (when (not (member v domain-list))
-                      (set! domain-list (append domain-list (list v)))
-                      ;; Assign next range value (cycling if needed)
-                      (let ((idx (- (length domain-list) 1)))
-                        (if (null? range-list)
-                            (hash-table-set! value-map v idx)
-                            (hash-table-set! value-map v 
-                                           (list-ref range-list 
-                                                    (modulo idx (length range-list))))))))
-                  values))
-       
+        (for-each-elt (lambda (v)
+                        (when (not (member v domain-list))
+                          (set! domain-list (append domain-list (list v)))
+                          ;; Assign next range value (cycling if needed)
+                          (let ((idx (- (length domain-list) 1)))
+                            (if (null? range-list)
+                                (hash-table-set! value-map v idx)
+                                (hash-table-set! value-map v
+                                                 (list-ref range-list
+                                                           (modulo idx (length range-list))))))))
+                      values))
+
        ((scale-map self value)
         (hash-table-ref/default value-map value 
                                 (if (null? range-list) 0 (car range-list))))
@@ -402,10 +403,10 @@
        ((scale-set-range! self new-range) (set! range-pair new-range))
        
        ((scale-train! self values)
-        (for-each (lambda (v)
-                    (when (not (member v domain-list))
-                      (set! domain-list (append domain-list (list v)))))
-                  values))
+        (for-each-elt (lambda (v)
+                        (when (not (member v domain-list))
+                          (set! domain-list (append domain-list (list v)))))
+                      values))
        
        ((scale-map self value)
         ;; Map value to center of its band.

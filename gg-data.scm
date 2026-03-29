@@ -10,15 +10,19 @@
    data-columns
    data-row
    data-rows
-   
+
    ;; Data conversion
    columns->rows
-   rows->columns)
+   rows->columns
+
+   ;; Collection utilities
+   collection-unique)
 
   (import scheme
           (chicken base)
           (chicken format)
-          srfi-1)
+          srfi-1
+          yasos-collections)
           
 
   ;;; ========================================================================
@@ -54,7 +58,7 @@
     "Get number of rows in data"
     (if (null? data)
         0
-        (length (cdar data))))
+        (size (cdar data))))
 
   ;;; ========================================================================
   ;;; Row Operations
@@ -64,7 +68,7 @@
     "Extract a single row as an association list"
     (map (lambda (col)
            (cons (car col)
-                 (list-ref (cdr col) index)))
+                 (elt-ref (cdr col) index)))
          data))
 
   (define (data-rows data)
@@ -92,5 +96,16 @@
                               (cdr (assoc col-name row)))
                             rows)))
                column-names))))
+
+  ;;; ========================================================================
+  ;;; Collection Utilities
+  ;;; ========================================================================
+
+  (define (collection-unique coll)
+    "Return list of unique elements from a collection, preserving first-occurrence order."
+    (reverse (reduce (lambda (v acc)
+                       (if (member v acc) acc (cons v acc)))
+                     '()
+                     coll)))
 
 ) ; end module

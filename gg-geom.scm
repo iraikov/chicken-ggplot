@@ -39,6 +39,7 @@
           (chicken format)
           (chicken sort)
           srfi-1
+          (except yasos-collections sort sort!)
           gg-primitives-vge
           gg-scales
           gg-data
@@ -190,7 +191,7 @@
         
         (if group-col
             ;; Grouped lines
-            (let* ((groups (delete-duplicates (data-column data group-col)))
+            (let* ((groups (collection-unique (data-column data group-col)))
                    ;; Draw separate colored line for each group
                    (group-lines
                     (map (lambda (g)
@@ -450,15 +451,13 @@
      Required aesthetics: xmin, xmax, ymin, ymax"
     
     ;; Train scales (need to handle xmin/xmax/ymin/ymax)
-    (let* ((x-data (append (data-column data (aes-get aesthetic-map 'xmin))
-                           (data-column data (aes-get aesthetic-map 'xmax))))
-           (y-data (append (data-column data (aes-get aesthetic-map 'ymin))
-                           (data-column data (aes-get aesthetic-map 'ymax))))
-           (x-scale (make-scale-linear))
-           (y-scale (make-scale-linear)))
+    (let ((x-scale (make-scale-linear))
+          (y-scale (make-scale-linear)))
 
-      (scale-train! x-scale x-data)
-      (scale-train! y-scale y-data)
+      (scale-train! x-scale (data-column data (aes-get aesthetic-map 'xmin)))
+      (scale-train! x-scale (data-column data (aes-get aesthetic-map 'xmax)))
+      (scale-train! y-scale (data-column data (aes-get aesthetic-map 'ymin)))
+      (scale-train! y-scale (data-column data (aes-get aesthetic-map 'ymax)))
       
       (let ((trained-scales (list (cons 'x x-scale) (cons 'y y-scale))))
         
@@ -520,15 +519,13 @@
      Required aesthetics: x, y, xend, yend"
     
     ;; Train scales
-    (let* ((x-data (append (data-column data (aes-get aesthetic-map 'x))
-                          (data-column data (aes-get aesthetic-map 'xend))))
-           (y-data (append (data-column data (aes-get aesthetic-map 'y))
-                          (data-column data (aes-get aesthetic-map 'yend))))
-           (x-scale (make-scale-linear))
-           (y-scale (make-scale-linear)))
-      
-      (scale-train! x-scale x-data)
-      (scale-train! y-scale y-data)
+    (let ((x-scale (make-scale-linear))
+          (y-scale (make-scale-linear)))
+
+      (scale-train! x-scale (data-column data (aes-get aesthetic-map 'x)))
+      (scale-train! x-scale (data-column data (aes-get aesthetic-map 'xend)))
+      (scale-train! y-scale (data-column data (aes-get aesthetic-map 'y)))
+      (scale-train! y-scale (data-column data (aes-get aesthetic-map 'yend)))
       
       (let ((trained-scales (list (cons 'x x-scale) (cons 'y y-scale))))
         
@@ -586,10 +583,11 @@
                               ;; No scales provided - need to train manually
                               (let* ((event-col (aes-get aesthetic-map 'x))
                                      (trial-col (aes-get aesthetic-map 'y))
-                                     (all-events (apply append (data-column data event-col)))
                                      (x-scale (make-scale-linear))
                                      (y-scale (make-scale-linear)))
-                                (scale-train! x-scale all-events)
+                                (for-each-elt (lambda (event-coll)
+                                               (scale-train! x-scale event-coll))
+                                              (data-column data event-col))
                                 (scale-train! y-scale (data-column data trial-col))
                                 (list (cons 'x x-scale) (cons 'y y-scale)))
                               ;; Scales provided - use them directly
@@ -622,15 +620,18 @@
                                 ;; Default parameter
                                 (else color))))
                          
-                         (if (list? events)
+                         (if (collection? events)
                              (apply combine
-                                    (map (lambda (event-time)
-                                           (let ((x-pos (scale-map x-scale event-time)))
-                                             (line x-pos (- y-pos half-h)
-                                                   x-pos (+ y-pos half-h)
-                                                   #:color line-color
-                                                   #:width width)))
-                                         events))
+                                    (reverse
+                                     (reduce (lambda (event-time acc)
+                                               (let ((x-pos (scale-map x-scale event-time)))
+                                                 (cons (line x-pos (- y-pos half-h)
+                                                             x-pos (+ y-pos half-h)
+                                                             #:color line-color
+                                                             #:width width)
+                                                       acc)))
+                                             '()
+                                             events)))
                              empty-drawer)))
                      (data-rows data)))
          trained-scales))))
@@ -646,7 +647,7 @@
            (y-col (aes-get aes-map 'y))
            (x-scale (if (symbol? x-col)
                         (let ((col-data (data-column data x-col)))
-                          (if (number? (car col-data))
+                          (if (number? (elt-ref col-data 0))
                               (scale-with-range
                                (scale-with-trained (make-scale-linear) col-data)
                                x-range)
@@ -656,7 +657,7 @@
                         #f))
            (y-scale (if (symbol? y-col)
                         (let ((col-data (data-column data y-col)))
-                          (if (number? (car col-data))
+                          (if (number? (elt-ref col-data 0))
                               (scale-with-range
                                (scale-with-trained (make-scale-linear) col-data)
                                y-range)
