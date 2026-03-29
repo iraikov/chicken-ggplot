@@ -11,7 +11,7 @@
         srfi-1
         matchable
         datatype
-        gg-primitives
+        gg-primitives-vge
         gg-scales
         gg-aes
         gg-geom
