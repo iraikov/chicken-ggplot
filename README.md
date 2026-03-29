@@ -1,6 +1,6 @@
 # ggplot
 
-A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.org/), inspired by [ggplot2](https://ggplot2.tidyverse.org/). Plots are described as composable declarative S-expressions that are translated into vector graphics via [GNU libplot](https://www.gnu.org/software/plotutils/).
+A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.org/), inspired by [ggplot2](https://ggplot2.tidyverse.org/). Plots are described as composable declarative S-expressions that are translated into vector graphics via the [Cairo graphics library](https://www.cairographics.org/).
 
 ## Features
 
@@ -26,7 +26,7 @@ chicken-install ggplot
 
 The following eggs must be available:
 
-- [`plot`](https://wiki.call-cc.org/eggref/5/plot) - GNU libplot wrapper
+- [`cairo`](https://wiki.call-cc.org/eggref/5/cairo) - Cairo bindings
 - [`matchable`](https://wiki.call-cc.org/eggref/5/matchable) - pattern matching
 - [`datatype`](https://wiki.call-cc.org/eggref/5/datatype) - algebraic data types
 - [`statistics`](https://wiki.call-cc.org/eggref/5/statistics) - statistical functions
@@ -61,7 +61,7 @@ or together.
 
 | Module | Purpose |
 |---|---|
-| `gg-primitives` | Low-level drawing combinators wrapping GNU libplot |
+| `gg-primitives` | Low-level drawing combinators wrapping Cairo and GNU libplot |
 | `gg-scales` | Data-to-visual mappings (domain training, break computation) |
 | `gg-data` | Columnar data frame utilities |
 | `gg-aes` | Aesthetic mappings between data columns and visual channels |
