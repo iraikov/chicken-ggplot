@@ -530,7 +530,7 @@
 
   (define (layer-errorbar #!key (data #f) (mapping (aes))
                           (stat 'identity) (fun-ymin #f) (fun-ymax #f)
-                          (color "black") (width 2) (cap-width 0.1))
+                          (color "black") (width 1.5) (cap-width 0.4))
     "Create error bar layer
    
      Two modes of operation:
@@ -702,7 +702,7 @@
 
   (define (layer-col #!key (data #f) (mapping (aes))
                      (fun #f) (position 'stack)
-                     (fill "steelblue") (color "black") (width 0.8))
+                     (fill "steelblue") (color "black") (width 0.5))
     "Create column chart with automatic grouping and summary statistics
    
      Similar to layer-bar but with statistical preprocessing.
@@ -926,51 +926,62 @@
   ;;; Themes
   ;;; ========================================================================
 
-  (define (theme-minimal #!key (base-size 11) (base-family "sans"))
+  (define (theme-minimal #!key (base-size 12) (base-family "sans"))
     "Minimal theme with light background"
     `(theme (name . minimal)
             (base-size . ,base-size)
             (base-family . ,base-family)
+            (plot-background . "white")
             (panel (background . "white")
                    (grid-major . "gray90")
                    (grid-minor . #f)
                    (border . #f))
-            (axis (line . "gray50")
-                  (text-size . 9.0)
-                  (title-size . 10.0))
+            (axis (line . "gray50"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
             (legend (position . right)
                     (background . #f))))
 
-  (define (theme-classic #!key (base-size 11) (base-family "serif"))
+  (define (theme-classic #!key (base-size 12) (base-family "serif"))
     "Classic theme with borders, no grid"
     `(theme (name . classic)
             (base-size . ,base-size)
             (base-family . ,base-family)
+            (plot-background . "white")
             (panel (background . "white")
                    (grid-major . #f)
                    (grid-minor . #f)
                    (border . "black"))
-            (axis (line . "black")
-                  (text-size . 9.0)
-                  (title-size . 10.0))
+            (axis (line . "black"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
             (legend (position . right)
                     (background . "white"))))
 
-  (define (theme-bw #!key (base-size 11))
+  (define (theme-bw #!key (base-size 12))
     "Black and white theme"
     `(theme (name . bw)
             (base-size . ,base-size)
+            (plot-background . "white")
             (panel (background . "white")
                    (grid-major . "gray80")
                    (grid-minor . "gray90")
                    (border . "black"))
-            (axis (line . "black")
-                  (text-size . 9.0)
-                  (title-size . 10.0))))
+            (axis (line . "black"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))))
 
-  (define (theme-void #!key (base-size 11))
+  (define (theme-void #!key (base-size 12))
     "Completely void theme (no axes, grid, etc.)"
     `(theme (name . void)
+            (base-size . ,base-size)
+            (plot-background . "white")
             (panel (background . "white")
                    (grid-major . #f)
                    (grid-minor . #f)
@@ -978,8 +989,10 @@
             (axis (line . #f)
                   (text . #f)
                   (ticks . #f))
-            (base-size . ,base-size)
-            ))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))))
 
   ;;; ========================================================================
   ;;; Labels
@@ -1136,19 +1149,110 @@
       (vge-render! vge backend)))
 
   ;;; Build the complete drawer tree for a plot (pure — no I/O).
+  ;;; -----------------------------------------------------------------------
+  ;;; Layout Helpers
+  ;;; -----------------------------------------------------------------------
+
+  ;;; Reference canvas for resolution-independent font scaling.
+  ;;; Theme base-size values are calibrated for this pixel size.
+  ;;; All font and margin sizes are scaled proportionally when rendering
+  ;;; at a different resolution, preserving visual weight.
+  (define gg-reference-width  800.0)
+  (define gg-reference-height 600.0)
+
+  ;;; Compute a resolution scale factor relative to the reference canvas.
+  ;;; Uses the geometric mean of dimension ratios so the scale is
+  ;;; independent of aspect ratio: a 1600x1200 canvas yields scale=2.0
+  ;;; regardless of which dimension dominates.
+  (define (compute-resolution-scale width height)
+    (sqrt (* (/ (exact->inexact width)  gg-reference-width)
+             (/ (exact->inexact height) gg-reference-height))))
+
+  ;;; Return a copy of theme with base-size scaled for (width x height).
+  ;;; All downstream size computations read base-size from the theme, so
+  ;;; this single substitution makes fonts, margins, and tick lengths all
+  ;;; scale together with the canvas resolution.
+  (define (scale-theme-for-resolution theme width height)
+    (let* ((scale     (compute-resolution-scale width height))
+           (bs        (exact->inexact (or (assq-ref theme 'base-size) 12.0)))
+           (bs-scaled (* bs scale)))
+      (cons (car theme)   ;; keep leading 'theme symbol
+            (map (lambda (entry)
+                   (if (and (pair? entry) (eq? (car entry) 'base-size))
+                       (cons 'base-size bs-scaled)
+                       entry))
+                 (cdr theme)))))
+
+  (define (compute-plot-margins theme)
+    "Return (margin-left margin-right margin-bottom margin-top) scaled to base-size.
+     At base-size=11 (default) the margins are 77/28/61/61 px, close to the
+     previous hardcoded values of 80/30/60/60."
+    (let ((bs (exact->inexact (or (assq-ref theme 'base-size) 12.0))))
+      (list
+        (inexact->exact (round (* bs 7.0)))   ; left   (~77 @ 11pt)
+        (inexact->exact (round (* bs 2.5)))   ; right  (~28 @ 11pt)
+        (inexact->exact (round (* bs 5.5)))   ; bottom (~61 @ 11pt)
+        (inexact->exact (round (* bs 5.5))))));top    (~61 @ 11pt)
+
+  (define (estimate-y-axis-label-width scale label-size label-offset tick-count)
+    "Estimate pixel width from the Y axis line to the leftmost extent of the
+     left-axis area, including tick labels and the rotated axis title.
+
+     Mirrors the layout in axis-drawer (gg-guides) for the left-axis case:
+       tick labels: right-aligned at -label-offset
+       title center: -(label-offset + max-lbl-w + label-size)
+       title font: label-size * 1.2, half-width when rotated = label-size * 0.6
+
+     The 0.65 character-width factor matches the heuristic in axis-drawer."
+    (let* ((breaks    (scale-breaks scale tick-count))
+           (labels    (scale-labels scale breaks))
+           (max-lbl-w (if (null? labels)
+                          0
+                          (inexact->exact
+                           (round (* (apply max (map string-length labels))
+                                     label-size 0.65)))))
+           ;; Space for the rotated axis title beyond the tick labels.
+           ;; title-x = -(label-offset + max-lbl-w + label-size); font = label-size*1.2
+           ;; left edge of title = title-x - label-size*0.6
+           (title-extra (inexact->exact (round (* label-size 1.6)))))
+      (+ label-offset max-lbl-w title-extra)))
+
+  (define (make-canvas-background-drawer width height color)
+    "Return a drawer that fills the entire canvas with COLOR.
+     Must be prepended to all other drawers so it sits behind everything."
+    (if (and color
+             (not (equal? color "none"))
+             (not (equal? color "transparent")))
+        (with-fill-color color
+          (with-pen-color color-transparent
+            (filled-rect-drawer 0.0 0.0
+                                (exact->inexact width)
+                                (exact->inexact height))))
+        empty-drawer))
+
   (define (compile-plot spec scales width height)
-    (let* ((theme   (plot-spec-theme  spec))
-           (labels  (plot-spec-labels spec))
-           (panels  (compute-facet-panels spec scales width height)))
+    (let* ((raw-theme (plot-spec-theme spec))
+           ;; Scale base-size so fonts/margins are resolution-independent:
+           ;; a 2400x1600 render gets ~2.83x larger fonts than 800x600.
+           (theme    (scale-theme-for-resolution raw-theme width height)))
+      ;; Install the scaled theme back into the (already-normalized) spec
+      ;; so all downstream functions that call (plot-spec-theme spec) pick
+      ;; up the correctly scaled base-size without requiring signature changes.
+      (plot-spec-theme-set! spec theme)
+      (let* ((labels   (plot-spec-labels spec))
+             (panels   (compute-facet-panels spec scales width height))
+             (bg-color (or (assq-ref theme 'plot-background) "white")))
       (apply combine
         (append
+          ;; Full-canvas background fill (fixes transparent PNG margins)
+          (list (make-canvas-background-drawer width height bg-color))
           ;; One drawer per panel
           (map (lambda (panel)
                  (compile-panel panel theme))
                panels)
           ;; Global elements: title, subtitle, legends
           (list (compile-global-elements-drawer
-                   spec scales width height theme labels))))))
+                   spec scales width height theme labels)))))))
 
   ;;; Compile a single panel into a combined drawer.
   (define (compile-panel panel theme)
@@ -1179,7 +1283,7 @@
         ;; Facet strip label (when present)
         (let ((facet-label (assq-ref panel 'facet-label)))
           (if facet-label
-              (compile-panel-strip-drawer bounds facet-label)
+              (compile-panel-strip-drawer bounds facet-label theme)
               empty-drawer)))))
 
 
@@ -1548,23 +1652,16 @@
   ;;; ------------------------------------------------------------------------
   
   (define (compute-facet-panels spec scales width height)
-    "Compute panels for faceting with proper pixel margins
-   
-     Margins:
-     - Left: 80px (y-axis)
-     - Right: 30px (or 150px if legend)
-     - Bottom: 80px (x-axis)
-     - Top: 80px (title/subtitle)"
-  
-    (let ((facet-spec (plot-spec-facet spec))
-          ;; Fixed pixel margins
-          ;; margin-left = 80: leaves room for y-axis tick labels (up to ~7 chars
-          ;; at 10pt) plus the rotated axis title just clear of them.
-          (margin-left 80)
-          (margin-right 30)
-          (margin-bottom 60)
-          (margin-top 60))
-      
+    "Compute panels for faceting.  Margins are derived from the theme base-size
+     so that all font-size-sensitive spacing scales consistently."
+    (let* ((theme       (plot-spec-theme spec))
+           (facet-spec  (plot-spec-facet spec))
+           (margins     (compute-plot-margins theme))
+           (margin-left   (first  margins))
+           (margin-right  (second margins))
+           (margin-bottom (third  margins))
+           (margin-top    (fourth margins)))
+
       (match facet-spec
         (('facet ('type . 'null) . _)
          ;; No faceting - single panel
@@ -1572,21 +1669,21 @@
                (y-min margin-bottom)
                (x-max (- width margin-right))
                (y-max (- height margin-top)))
-           (list (make-panel spec scales #f 
+           (list (make-panel spec scales #f
                              (list x-min y-min x-max y-max)))))
-        
+
         (('facet ('type . 'wrap) . props)
          (compute-wrap-panels spec scales props width height))
-        
+
         (('facet ('type . 'grid) . props)
          (compute-grid-panels spec scales props width height))
-        
+
         (else
          (let ((x-min margin-left)
                (y-min margin-bottom)
                (x-max (- width margin-right))
                (y-max (- height margin-top)))
-           (list (make-panel spec scales #f 
+           (list (make-panel spec scales #f
                              (list x-min y-min x-max y-max))))))))
 
   
@@ -1638,85 +1735,114 @@
                             (inexact->exact (ceiling (sqrt n-panels)))))
            (nrows       (or nrow-prop
                             (inexact->exact (ceiling (/ n-panels ncols)))))
-           ;; Layout constants
-           (margin-left   80)   ; room for y-axis tick labels + rotated title
-           (margin-right  20)
-           (margin-bottom 60)
-           (margin-top    70)   ; room for title + subtitle above strips
-           (strip-height  20)
-           (h-gap         55)  ; room for each non-first panel's y-axis labels
-           (v-gap         10)
-           ;; Per-panel pixel dimensions
-           (total-pw  (- width  margin-left margin-right  (* (- ncols 1) h-gap)))
-           (total-ph  (- height margin-top  margin-bottom
-                         (* nrows strip-height) (* (- nrows 1) v-gap)))
-           (pw        (/ total-pw ncols))
-           (ph        (/ total-ph nrows))
+           ;; Layout constants derived from theme base-size
+           (theme       (plot-spec-theme spec))
+           (bs          (exact->inexact (or (assq-ref theme 'base-size) 12.0)))
+           (margins     (compute-plot-margins theme))
+           (margin-left   (first  margins))
+           (margin-right  (second margins))
+           (margin-bottom (third  margins))
+           (margin-top    (inexact->exact (round (* bs 6.5)))) ; extra for strips
+           (strip-height  (inexact->exact (round (* bs 1.8))))
+           (v-gap         (inexact->exact (round (* bs 0.9))))
            ;; Free-scale flags
            (free-y?   (or (string=? scales-mode "free_y")
                           (string=? scales-mode "free")))
            (free-x?   (or (string=? scales-mode "free_x")
-                          (string=? scales-mode "free"))))
+                          (string=? scales-mode "free")))
+           ;; Phase 1: pre-train per-panel scales so we can measure label widths
+           ;; before committing to a layout.  Each entry is (val fspec panel-scales).
+           (val-data
+            (map (lambda (val)
+                   (let* ((fdata (filter-data-by-column data facet-var val))
+                          (fspec (make-plot-spec fdata
+                                                 (plot-spec-default-aes spec)
+                                                 (plot-spec-layers spec)
+                                                 (plot-spec-scales spec)
+                                                 (plot-spec-coord spec)
+                                                 (plot-spec-facet spec)
+                                                 (plot-spec-theme spec)
+                                                 (plot-spec-labels spec)))
+                          (panel-scales
+                           (if (or free-y? free-x?)
+                               (let ((rt (train-plot-scales fspec)))
+                                 (map (lambda (s-entry)
+                                        (let ((key (car s-entry)))
+                                          (cond
+                                           ((and (eq? key 'y) free-y?)
+                                            (or (assq 'y rt) s-entry))
+                                           ((and (eq? key 'x) free-x?)
+                                            (or (assq 'x rt) s-entry))
+                                           (else s-entry))))
+                                      scales))
+                               scales)))
+                     (list val fspec panel-scales)))
+                 facet-vals))
+           ;; Phase 2: compute h-gap wide enough for the worst-case Y-axis labels.
+           ;; These constants mirror compile-panel-axes-drawer and make-axis defaults.
+           (tick-lbl-sz (* bs 0.9))
+           (lbl-offset  15)
+           (tick-count  5)
+           (max-y-lbl-w
+            (apply max 0
+              (map (lambda (entry)
+                     (let ((ps (third entry)))
+                       (let ((y-sc (assq-ref ps 'y)))
+                         (if y-sc
+                             (estimate-y-axis-label-width
+                              y-sc tick-lbl-sz lbl-offset tick-count)
+                             0))))
+                   val-data)))
+           (h-gap (max (inexact->exact (round (* bs 5.0)))
+                       (inexact->exact (round (+ max-y-lbl-w (* bs 0.5))))))
+           ;; Per-panel pixel dimensions (depend on h-gap)
+           (total-pw  (- width  margin-left margin-right  (* (- ncols 1) h-gap)))
+           (total-ph  (- height margin-top  margin-bottom
+                         (* nrows strip-height) (* (- nrows 1) v-gap)))
+           (pw        (/ total-pw ncols))
+           (ph        (/ total-ph nrows)))
 
-      (let loop ((vals facet-vals) (idx 0) (result '()))
-        (if (null? vals)
+      ;; Phase 3: assign pixel bounds to each panel using the computed h-gap.
+      (let loop ((entries val-data) (idx 0) (result '()))
+        (if (null? entries)
             (reverse result)
-            (let* ((val   (car vals))
-                   (col   (remainder idx ncols))
-                   (row   (quotient  idx ncols))
+            (let* ((entry  (car entries))
+                   (val    (first  entry))
+                   (fspec  (second entry))
+                   (ps     (third  entry))
+                   (col    (remainder idx ncols))
+                   (row    (quotient  idx ncols))
                    ;; x increases left->right
-                   (x-min (exact->inexact (+ margin-left (* col (+ pw h-gap)))))
-                   (x-max (exact->inexact (+ x-min pw)))
+                   (x-min  (exact->inexact (+ margin-left (* col (+ pw h-gap)))))
+                   (x-max  (exact->inexact (+ x-min pw)))
                    ;; Row 0 is the topmost row; y increases upward in libplot
                    ;; y-max of panel in row r is below the strip for that row
-                   (y-max (exact->inexact
-                           (- height margin-top strip-height
-                              (* row (+ ph strip-height v-gap)))))
-                   (y-min (exact->inexact (- y-max ph)))
+                   (y-max  (exact->inexact
+                            (- height margin-top strip-height
+                               (* row (+ ph strip-height v-gap)))))
+                   (y-min  (exact->inexact (- y-max ph)))
                    (bounds (list x-min y-min x-max y-max))
-                   ;; Filtered plot-spec for this facet level
-                   (fdata (filter-data-by-column data facet-var val))
-                   (fspec (make-plot-spec fdata
-                                          (plot-spec-default-aes spec)
-                                          (plot-spec-layers spec)
-                                          (plot-spec-scales spec)
-                                          (plot-spec-coord spec)
-                                          (plot-spec-facet spec)
-                                          (plot-spec-theme spec)
-                                          (plot-spec-labels spec)))
-                   ;; Retrain scales per panel for free axes
-                   (panel-scales
-                    (if (or free-y? free-x?)
-                        (let ((rt (train-plot-scales fspec)))
-                          (map (lambda (s-entry)
-                                 (let ((key (car s-entry)))
-                                   (cond
-                                    ((and (eq? key 'y) free-y?)
-                                     (or (assq 'y rt) s-entry))
-                                    ((and (eq? key 'x) free-x?)
-                                     (or (assq 'x rt) s-entry))
-                                    (else s-entry))))
-                               scales))
-                        scales))
                    (label-str (if (string? val)
                                   val
                                   (format #f "~a" val))))
-              (loop (cdr vals)
+              (loop (cdr entries)
                     (+ idx 1)
-                    (cons (make-panel fspec panel-scales label-str bounds)
+                    (cons (make-panel fspec ps label-str bounds)
                           result)))))))
   
   (define (compute-grid-panels spec scales props width height)
     "Compute panels for facet-grid"
-    (let* ((margin-left 60)
-          (margin-right 30)
-          (margin-bottom 60)
-          (margin-top 60)
-          (x-min margin-left)
-          (y-min margin-bottom)
-          (x-max (- width margin-right))
-          (y-max (- height margin-top)))
-      (list (make-panel spec scales #f 
+    (let* ((theme   (plot-spec-theme spec))
+           (margins (compute-plot-margins theme))
+           (margin-left   (first  margins))
+           (margin-right  (second margins))
+           (margin-bottom (third  margins))
+           (margin-top    (fourth margins))
+           (x-min margin-left)
+           (y-min margin-bottom)
+           (x-max (- width margin-right))
+           (y-max (- height margin-top)))
+      (list (make-panel spec scales #f
                         (list x-min y-min x-max y-max)))))
 
   ;;; ------------------------------------------------------------------------
@@ -1746,15 +1872,17 @@
                   scale-entry))))
            scales)))
   
-  (define (compile-panel-strip-drawer bounds facet-label)
+  (define (compile-panel-strip-drawer bounds facet-label theme)
     "Return a drawer for the facet strip label above a panel."
-    (let* ((x-min       (first  bounds))
-           (x-max       (third  bounds))
-           (y-max       (fourth bounds))
-           (strip-height 20)
-           (sy-min      (exact->inexact y-max))
-           (x-center    (exact->inexact (/ (+ x-min x-max) 2)))
-           (y-center    (exact->inexact (+ sy-min (/ strip-height 2)))))
+    (let* ((base-size    (exact->inexact (or (assq-ref theme 'base-size) 12.0)))
+           (strip-size   (* base-size 0.9))
+           (strip-height (inexact->exact (round (* base-size 1.8))))
+           (x-min        (first  bounds))
+           (x-max        (third  bounds))
+           (y-max        (fourth bounds))
+           (sy-min       (exact->inexact y-max))
+           (x-center     (exact->inexact (/ (+ x-min x-max) 2)))
+           (y-center     (exact->inexact (+ sy-min (/ strip-height 2)))))
       (combine
         ;; Background rectangle
         (with-pen-color "gray60"
@@ -1762,7 +1890,7 @@
             (filled-rect-drawer x-min sy-min (- x-max x-min) (exact->inexact strip-height))))
         ;; Centred label
         (with-pen-color "black"
-          (with-font "sans" 9.0 'normal 'normal
+          (with-font "sans" strip-size 'normal 'normal
             (text-drawer x-center y-center facet-label
                          #:halign halign/center
                          #:valign valign/center))))))
@@ -1905,7 +2033,7 @@
   (define (compile-geom-bar data aes scales params)
     "Compile bar geometry into a drawer."
     (let ((fill  (or (assq-ref params 'fill)  "steelblue"))
-          (width (or (assq-ref params 'width) 0.8)))
+          (width (or (assq-ref params 'width) 0.7)))
       (let-values (((drawer _) (geom-bar data aes
                                          #:scales scales
                                          #:fill fill
@@ -2066,8 +2194,8 @@
 
   (define (compile-geom-errorbar data aes scales params)
     (let ((color     (or (assq-ref params 'color)     "black"))
-          (width     (or (assq-ref params 'width)     2))
-          (cap-width (or (assq-ref params 'cap-width) 0.2)))
+          (width     (or (assq-ref params 'width)     1.5))
+          (cap-width (or (assq-ref params 'cap-width) 0.5)))
       (let-values (((drawer _) (geom-errorbar data aes
                                               #:scales scales
                                               #:color color
@@ -2117,24 +2245,28 @@
 
   (define (compile-panel-axes-drawer scales theme bounds spec)
     "Return a drawer for panel axes (x and y)."
-    (let ((x-scale     (assq-ref scales 'x))
-          (y-scale     (assq-ref scales 'y))
-          (x-min       (first  bounds))
-          (y-min       (second bounds))
-          (scale-specs (plot-spec-scales spec)))
+    (let* ((x-scale      (assq-ref scales 'x))
+           (y-scale      (assq-ref scales 'y))
+           (x-min        (first  bounds))
+           (y-min        (second bounds))
+           (scale-specs  (plot-spec-scales spec))
+           (base-size    (exact->inexact (or (assq-ref theme 'base-size) 12.0)))
+           (tick-lbl-sz  (* base-size 0.9)))
       (combine
         (if x-scale
             (let* ((x-label (get-scale-label scale-specs 'scale-x))
                    (x-axis  (make-axis-bottom x-scale
                                               #:label x-label
-                                              #:tick-count 5)))
+                                              #:tick-count 5
+                                              #:label-size tick-lbl-sz)))
               (with-translate 0 y-min (axis-drawer x-axis)))
             empty-drawer)
         (if y-scale
             (let* ((y-label (get-scale-label scale-specs 'scale-y))
                    (y-axis  (make-axis-left y-scale
                                             #:label y-label
-                                            #:tick-count 5)))
+                                            #:tick-count 5
+                                            #:label-size tick-lbl-sz)))
               (with-translate x-min 0 (axis-drawer y-axis)))
             empty-drawer))))
 
@@ -2381,7 +2513,7 @@
 
   (define (compile-title-drawer title width height theme)
     "Return a drawer for the plot title at top-centre."
-    (let* ((base-size  (or (assq-ref theme 'base-size) 11.0))
+    (let* ((base-size  (or (assq-ref theme 'base-size) 12.0))
            (title-size (* base-size 1.5))
            (x          (exact->inexact (/ width 2)))
            (y          (exact->inexact (- height 30))))
@@ -2393,7 +2525,7 @@
 
   (define (compile-subtitle-drawer subtitle width height theme)
     "Return a drawer for the plot subtitle, below the title."
-    (let* ((base-size     (or (assq-ref theme 'base-size) 11.0))
+    (let* ((base-size     (or (assq-ref theme 'base-size) 12.0))
            (subtitle-size (* base-size 1.2))
            (x             (exact->inexact (/ width 2)))
            (y             (exact->inexact (- height 50))))
@@ -2471,9 +2603,13 @@
                               (scale       (if (= idx 0) color-scale fill-scale))
                               (title       (cadr legend-spec)))
                          (if scale
-                             (let* ((legend     (make-legend-discrete scale
+                             (let* ((base-size  (exact->inexact
+                                                 (or (assq-ref theme 'base-size) 12.0)))
+                                    (lbl-size   (* base-size 0.9))
+                                    (legend     (make-legend-discrete scale
                                                                       #:title title
-                                                                      #:position (cons legend-x legend-y)))
+                                                                      #:position (cons legend-x legend-y)
+                                                                      #:label-size lbl-size))
                                     (legend-drw (legend-drawer legend)))
                                legend-drw)
                              empty-drawer)))

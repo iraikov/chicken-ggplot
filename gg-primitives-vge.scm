@@ -60,6 +60,7 @@
     with-line-width     ;; (with-line-width width drawer)
     with-dash           ;; (with-dash dashes offset drawer)
     with-font           ;; (with-font family size slant weight drawer)
+    with-rotate         ;; (with-rotate angle drawer)
 
     ;; ── Stroked drawing primitives ───────────────────────────────────
     line-drawer         ;; (line-drawer x1 y1 x2 y2)
@@ -285,6 +286,19 @@
       (vge-group! vge
         (lambda (g)
           (vge-emit! g (gfx:set-font family (exact->inexact size) slant weight))
+          (render-drawer drawer g))))
+    (drawer-bounds drawer)))
+
+;;; Rotate the text anchor for child drawers by angle radians.
+;;; Positive angle = counter-clockwise (Y-up convention).
+;;; The scope is a gfx:group so rotation is automatically reset on exit.
+;;; Only affects text draws; stroked/filled geometry is unaffected.
+(define (with-rotate angle drawer)
+  (make-drawer
+    (lambda (vge)
+      (vge-group! vge
+        (lambda (g)
+          (vge-emit! g (gfx:set-rotation (exact->inexact angle)))
           (render-drawer drawer g))))
     (drawer-bounds drawer)))
 

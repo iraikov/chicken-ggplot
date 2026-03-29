@@ -31,7 +31,7 @@
 (define p1
   (ggplot summary-data (aes #:x 'treatment #:y 'mean 
                             #:ymin 'lower #:ymax 'upper)
-          (layer-errorbar #:cap-width 0.3 #:color "darkred")
+          (layer-errorbar #:cap-width 0.1 #:color "darkred")
           (layer-point #:size 6)
           (labs #:title "Categorical Data with Error Bars")
           ))
@@ -86,7 +86,7 @@
 (define p6
   (ggplot iris (aes #:x 'species #:y 'sepal_length)
           (layer-col #:fill "steelblue")
-          (layer-errorbar #:stat 'summary #:width 0.2 #:color "black")
+          (layer-errorbar #:stat 'summary #:cap-width 0.4 #:color "black")
           (labs #:title "Mean Sepal Length by Species")))
 
 

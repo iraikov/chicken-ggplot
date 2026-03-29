@@ -40,6 +40,8 @@
     backend/set-fill-color!
     ;; Text / font  (size in device points, not user coordinates)
     backend/set-font!
+    ;; Rotation angle in radians for subsequent text draw calls (0.0 = upright)
+    backend/set-rotation!
     ;; Stroked primitives
     backend/draw-line!
     backend/draw-polyline!   ; list of (x . y) pairs
@@ -320,6 +322,12 @@
 ;;;   weight  - symbol: 'normal | 'bold
 (define-operation (backend/set-font! self family size slant weight)
   (error "backend/set-font!: not implemented" self))
+
+;;; Rotation angle (radians) applied to subsequent text draw calls.
+;;; 0.0 = upright; positive = counter-clockwise in user (Y-up) space.
+;;; The default implementation is a no-op (backends may ignore rotation).
+(define-operation (backend/set-rotation! self angle)
+  (void))
 
 ;;; Stroked primitives
 ;;;

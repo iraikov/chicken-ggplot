@@ -93,7 +93,8 @@
 
 (define-record-type <draw-state>
   (%make-ds viewport pen fill line-width
-            font-family font-size font-slant font-weight)
+            font-family font-size font-slant font-weight
+            rotation)
   draw-state?
   (viewport    ds-viewport    ds-viewport-set!)
   (pen         ds-pen         ds-pen-set!)
@@ -102,19 +103,22 @@
   (font-family ds-font-family ds-font-family-set!)
   (font-size   ds-font-size   ds-font-size-set!)
   (font-slant  ds-font-slant  ds-font-slant-set!)
-  (font-weight ds-font-weight ds-font-weight-set!))
+  (font-weight ds-font-weight ds-font-weight-set!)
+  (rotation    ds-rotation    ds-rotation-set!))
 
 (define (make-default-draw-state w h)
   (%make-ds (make-identity-viewport w h)
             color-black color-white
             1.0
-            "sans-serif" 12.0 'normal 'normal))
+            "sans-serif" 12.0 'normal 'normal
+            0.0))
 
 (define (copy-draw-state ds)
   (%make-ds (ds-viewport    ds) (ds-pen    ds) (ds-fill ds)
             (ds-line-width  ds)
             (ds-font-family ds) (ds-font-size ds)
-            (ds-font-slant  ds) (ds-font-weight ds)))
+            (ds-font-slant  ds) (ds-font-weight ds)
+            (ds-rotation    ds)))
 
 ;;; ================================================================
 ;;; Cairo helper shims
@@ -191,32 +195,41 @@
 
 (define (cairo-draw-text! ctx vp ds x y text halign valign)
   (let ((dx (vp->dx vp x))
-        (dy (vp->dy vp y)))
+        (dy (vp->dy vp y))
+        (angle (ds-rotation ds)))
     (cairo-save ctx)
-    ;; Apply font in device space (identity CTM)
+    ;; Work in device space (identity CTM) so font metrics are stable.
     (cairo-identity-matrix ctx)
     (cairo-apply-font! ctx ds)
     (cairo-set-color! ctx (ds-pen ds))
-    ;; Measure text for alignment adjustment
     (let ((te (make-cairo-text-extents-type)))
       (cairo-text-extents ctx text te)
       (let* ((tw  (cairo-text-extents-width    te))
              (th  (cairo-text-extents-height   te))
              (tb  (cairo-text-extents-y-bearing te))   ; usually negative
-             ;; Horizontal anchor
-             (ax  (case halign
-                    ((halign/center) (- dx (/ tw 2.0)))
-                    ((halign/right)  (- dx tw))
-                    (else             dx)))              ; halign/left
-             ;; Vertical anchor
-             ;; Cairo baseline origin: positive y = below baseline
-             (ay  (case valign
-                    ((valign/center)   (- dy (+ (/ th 2.0) tb)))
-                    ((valign/bottom)   (- dy (+ th tb)))
-                    ((valign/baseline) dy)
-                    (else              (- dy tb)))))     ; valign/top
-        (cairo-move-to ctx ax ay)
-        (cairo-show-text ctx text)))
+             ;; Alignment offsets from anchor (0,0) in un-rotated text frame.
+             (ox  (case halign
+                    ((halign/center) (- (/ tw 2.0)))
+                    ((halign/right)  (- tw))
+                    (else             0.0)))              ; halign/left
+             (oy  (case valign
+                    ((valign/center)   (- (+ (/ th 2.0) tb)))
+                    ((valign/bottom)   (- (+ th tb)))
+                    ((valign/baseline) 0.0)
+                    (else              (- tb)))))         ; valign/top
+        (if (= angle 0.0)
+            ;; Fast path: no rotation
+            (begin
+              (cairo-move-to ctx (+ dx ox) (+ dy oy))
+              (cairo-show-text ctx text))
+            ;; Rotated path: translate to anchor, rotate, draw at offset.
+            ;; In Cairo device space Y is down, so a positive angle rotates
+            ;; clockwise.  For Y-up semantics (angle > 0 = CCW) we negate.
+            (begin
+              (cairo-translate ctx dx dy)
+              (cairo-rotate ctx (- angle))
+              (cairo-move-to ctx ox oy)
+              (cairo-show-text ctx text)))))
     (cairo-restore ctx)))
 
 ;;; ================================================================
@@ -228,7 +241,8 @@
 ;;;                 Called (with surface still valid) before disposal.
 ;;;                 Used by the PNG backend to write the file.
 
-(define (make-cairo-backend* make-surface! width height on-close!)
+(define (make-cairo-backend* make-surface! width height on-close!
+                              #!key (background #f))
   (let* ((w*   (exact->inexact width))
          (h*   (exact->inexact height))
          (ctx-cell  (list #f))   ;; mutable cell: #f or cairo_t
@@ -256,7 +270,14 @@
          (set-car! ctx-cell  c)
          (set-car! ds-cell   d)
          (set-car! stack     '())
-         (sync-line-width!)))
+         (sync-line-width!)
+         ;; Paint background before any drawing operations.
+         ;; For PNG (ARGB32) surfaces the surface starts fully transparent;
+         ;; painting here ensures the canvas color is correct even in areas
+         ;; that no geometry touches (title/axis-label margins, etc.).
+         (when background
+           (cairo-set-color! c (parse-color background))
+           (cairo-paint c))))
 
       ((backend/close! self)
        (when (ctx)
@@ -343,6 +364,9 @@
        (ds-font-size-set!   (ds) (exact->inexact size))
        (ds-font-slant-set!  (ds) slant)
        (ds-font-weight-set! (ds) weight))
+
+      ((backend/set-rotation! self angle)
+       (ds-rotation-set! (ds) (exact->inexact angle)))
 
       ;; Stroked primitives
 
@@ -519,13 +543,17 @@
     (lambda (surf) (void))))
 
 ;;; PNG: renders to in-memory ARGB32 bitmap; on-close! writes the file.
-(define (make-cairo-png-backend filename width height)
+;;; The background defaults to "white" so margins are opaque in viewers
+;;; that display transparency as a checkerboard pattern.
+;;; Pass #:background "none" or #:background #f for a transparent canvas.
+(define (make-cairo-png-backend filename width height #!key (background "white"))
   (make-cairo-backend*
     (lambda ()
       (cairo-image-surface-create CAIRO_FORMAT_ARGB32
         (inexact->exact (round width))
         (inexact->exact (round height))))
     width height
-    (lambda (surf) (cairo-surface-write-to-png surf filename))))
+    (lambda (surf) (cairo-surface-write-to-png surf filename))
+    #:background background))
 
 ) ;; end module gg-backend-cairo

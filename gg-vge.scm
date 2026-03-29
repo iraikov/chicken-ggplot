@@ -40,6 +40,7 @@
     gfx:set-line-width
     gfx:set-dash
     gfx:set-font
+    gfx:set-rotation
     gfx:draw-line
     gfx:draw-polyline
     gfx:draw-rect
@@ -124,6 +125,12 @@
   (gfx:set-font        (family string?) (size real?)
                        (slant symbol?)  (weight symbol?))
 
+  ;; Rotation angle in radians applied to subsequent text draw calls.
+  ;; Positive values rotate counter-clockwise in user (Y-up) space.
+  ;; Reset to 0.0 to restore upright text.
+  ;; Only affects text; stroked/filled geometry is always drawn upright.
+  (gfx:set-rotation    (angle real?))
+
   ;; Stroked drawing primitives
   (gfx:draw-line       (x1 real?) (y1 real?) (x2 real?) (y2 real?))
 
@@ -197,13 +204,13 @@
   (acc-cell vge-acc-cell))
 
 (define (make-vge)
-  (%make-vge (list '())))
+  (%make-vge (make-parameter '())))
 
 ;;; Emit a single instruction into the VGE.
 ;;; O(1) amortised.
 (define (vge-emit! vge insn)
   (let ((cell (vge-acc-cell vge)))
-    (set-car! cell (cons insn (car cell)))))
+    (cell (cons insn (cell)))))
 
 ;;; Emit a pre-built list of instructions in order.
 (define (vge-emit-all! vge insns)
@@ -229,11 +236,11 @@
 ;;; Return the accumulated instructions as an ordered list.
 ;;; Creates a fresh copy (snapshot); does not clear the accumulator.
 (define (vge-instructions vge)
-  (reverse (car (vge-acc-cell vge))))
+  (reverse ((vge-acc-cell vge))))
 
 ;;; Discard all accumulated instructions.
 (define (vge-clear! vge)
-  (set-car! (vge-acc-cell vge) '()))
+  ( (vge-acc-cell vge) '()))
 
 ;;; ================================================================
 ;;; Instruction interpreter
@@ -275,6 +282,9 @@
 
     (gfx:set-font (family size slant weight)
      (backend/set-font! backend family size slant weight))
+
+    (gfx:set-rotation (angle)
+     (backend/set-rotation! backend angle))
 
     ;; Stroked primitives
     (gfx:draw-line (x1 y1 x2 y2)
@@ -403,6 +413,7 @@
       (gfx:set-line-width  (_)       'set-line-width)
       (gfx:set-dash        (_ _)     'set-dash)
       (gfx:set-font        (_ _ _ _) 'set-font)
+      (gfx:set-rotation    (_)       'set-rotation)
       (gfx:set-viewport    (_ _ _ _) 'set-viewport)
       (gfx:translate       (_ _)     'translate)
       (else #f)))
@@ -482,6 +493,8 @@
            `(set-dash ,d ,o))
           (gfx:set-font (f s sl w)
            `(set-font ,f ,s ,sl ,w))
+          (gfx:set-rotation (a)
+           `(set-rotation ,a))
           (gfx:draw-line (x1 y1 x2 y2)
            `(draw-line ,x1 ,y1 ,x2 ,y2))
           (gfx:draw-polyline (pts)

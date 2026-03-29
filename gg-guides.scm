@@ -56,11 +56,6 @@
                                (exact->inexact w) (exact->inexact h)
                                fill-color edge-color))
 
-  ;; VGE has no rotation transform; render child unrotated.
-  ;; Axis titles on vertical axes will appear horizontally — a known
-  ;; limitation until VGE gains a gfx:rotate instruction.
-  (define (with-rotate angle drawer) drawer)
-
   ;;; ========================================================================
   ;;; Axis Abstraction
   ;;; ========================================================================
@@ -95,21 +90,21 @@
                                tick-length tick-width label-size 
                                label-offset line-color))
 
-  (define (make-axis-bottom scale #!key (label "") (tick-count 5))
+  (define (make-axis-bottom scale #!key (label "") (tick-count 5) (label-size 10.0))
     "Create a bottom (x) axis"
-    (make-axis scale 'bottom #:label label #:tick-count tick-count))
+    (make-axis scale 'bottom #:label label #:tick-count tick-count #:label-size label-size))
 
-  (define (make-axis-top scale #!key (label "") (tick-count 5))
+  (define (make-axis-top scale #!key (label "") (tick-count 5) (label-size 10.0))
     "Create a top (x) axis"
-    (make-axis scale 'top #:label label #:tick-count tick-count))
+    (make-axis scale 'top #:label label #:tick-count tick-count #:label-size label-size))
 
-  (define (make-axis-left scale #!key (label "") (tick-count 5))
+  (define (make-axis-left scale #!key (label "") (tick-count 5) (label-size 10.0))
     "Create a left (y) axis"
-    (make-axis scale 'left #:label label #:tick-count tick-count))
+    (make-axis scale 'left #:label label #:tick-count tick-count #:label-size label-size))
 
-  (define (make-axis-right scale #!key (label "") (tick-count 5))
+  (define (make-axis-right scale #!key (label "") (tick-count 5) (label-size 10.0))
     "Create a right (y) axis"
-    (make-axis scale 'right #:label label #:tick-count tick-count))
+    (make-axis scale 'right #:label label #:tick-count tick-count #:label-size label-size))
 
   ;;; ========================================================================
   ;;; Axis Rendering

@@ -916,8 +916,8 @@
 ;;; ------------------------------------------------------------------------
 
   (define (geom-errorbar data aesthetic-map
-                         #!key (scales '()) (color "black") 
-                         (width 2) (cap-width 0.1))
+                         #!key (scales '()) (color "black")
+                         (width 1.5) (cap-width 0.4))
     "Render error bars from preprocessed confidence intervals
    
      Required aesthetics: 
@@ -951,24 +951,27 @@
                               (y-max-pos (scale-map y-scale ymax))
                               ;; Compute cap width - handle both categorical and continuous
                               (cap-half-width 
-                               ;; Try to get bandwidth - only band scales support this
+                               ;; cap-width is the total cap width as a fraction of
+                               ;; category bandwidth (matching ggplot2 convention).
+                               ;; cap-half-width = cap-width/2 * bandwidth so the
+                               ;; rendered cap spans cap-width * bandwidth in total.
                                (handle-exceptions
                                 exn
                                 ;; Linear scale (continuous) - bandwidth not supported
                                 ;; Use fraction of pixel range instead
                                 (let ((x-range (scale-range x-scale)))
-                                  (* cap-width 
+                                  (* (/ cap-width 2)
                                      (- (cdr x-range) (car x-range))
-                                     0.02))
+                                     0.05))
                                 ;; Try to get bandwidth from band scale
                                 (let ((bandwidth (scale-bandwidth x-scale)))
                                   (if (and bandwidth (> bandwidth 0))
-                                      (* cap-width bandwidth)
+                                      (* (/ cap-width 2) bandwidth)
                                       ;; Fallback to pixel range
                                       (let ((x-range (scale-range x-scale)))
-                                        (* cap-width 
+                                        (* (/ cap-width 2)
                                            (- (cdr x-range) (car x-range))
-                                           0.02)))))))
+                                           0.05)))))))
                          
                          (combine
                           ;; Vertical line from ymin to ymax
