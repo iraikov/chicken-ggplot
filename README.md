@@ -11,8 +11,8 @@ A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.
 - Statistical transformations: histograms, density estimates, boxplots, violin plots, summary statistics
 - Faceted layouts (small multiples)
 - Annotation layers: text, rectangles, segments, arrows
-- Multiple output backends: PNG, SVG, PostScript, X11
-- Seven composable modules usable independently or together
+- Multiple output backends: PNG, SVG, PostScript, PDF (via Cairo)
+- Nine composable modules usable independently or together
 
 ## Installation
 
@@ -35,7 +35,7 @@ The following eggs must be available:
 ## Quick Start
 
 ```scheme
-(import gg-plot gg-primitives gg-scales gg-aes gg-geom)
+(import gg-plot gg-scales gg-aes gg-backend-cairo)
 
 (define data
   '((x . (1 2 3 4 5))
@@ -49,9 +49,7 @@ The following eggs must be available:
            #:x "X" #:y "Y")
     (theme-minimal)))
 
-(let ((ctx (make-png-plotter "plot.png" 800 600)))
-  (render-plot p ctx)
-  (delete-plotter (plotter-context-plotter ctx)))
+(ggsave p "plot.png" #:width 800 #:height 600)
 ```
 
 ## Modules
@@ -61,7 +59,10 @@ or together.
 
 | Module | Purpose |
 |---|---|
-| `gg-primitives` | Low-level drawing combinators wrapping Cairo and GNU libplot |
+| `gg-vge` | Virtual Graphics Engine — algebraic IR for graphics instructions |
+| `gg-backend` | Abstract backend protocol (YASOS interface) |
+| `gg-backend-cairo` | Cairo backend: PNG, SVG, PostScript, PDF output |
+| `gg-primitives-vge` | Low-level composable drawing combinators (drawers) |
 | `gg-scales` | Data-to-visual mappings (domain training, break computation) |
 | `gg-data` | Columnar data frame utilities |
 | `gg-aes` | Aesthetic mappings between data columns and visual channels |
@@ -126,7 +127,7 @@ layer-annotate-segment  layer-annotate-arrow
 (scale-y-continuous #:name "label")
 (scale-color-gradient #:low "white" #:high "blue")
 (scale-color-manual #:values '(("A" . "red") ("B" . "blue")))
-(scale-fill-gradient #:low "white" #:high "red")
+(scale-fill-manual  #:values '(("A" . "red") ("B" . "blue")))
 ```
 
 ### Labels
@@ -145,19 +146,25 @@ layer-annotate-segment  layer-annotate-arrow
 
 ### Output backends
 
+All backends are constructed from `gg-backend-cairo`:
+
 ```scheme
-(make-png-plotter filename width height)   ; PNG raster
-(make-svg-plotter filename width height)   ; SVG vector
-(make-ps-plotter  filename width height)   ; PostScript
-(make-x-plotter   width height)           ; X11 interactive window
+(make-cairo-png-backend filename width height)   ; PNG raster
+(make-cairo-svg-backend filename width height)   ; SVG vector
+(make-cairo-ps-backend  filename width height)   ; PostScript
+(make-cairo-pdf-backend filename width height)   ; PDF (width/height in pt; A4 = 595×842)
 ```
 
-Render and finalise:
+Render using `render-plot` or the `ggsave` convenience function:
 
 ```scheme
-(let ((ctx (make-png-plotter "out.png" 800 600)))
-  (render-plot plot ctx)
-  (delete-plotter (plotter-context-plotter ctx)))
+;; Low-level: pass a backend directly
+(render-plot plot (make-cairo-png-backend "out.png" 800 600))
+
+;; Convenience: format inferred from file extension
+(ggsave plot "out.png" #:width 800 #:height 600)
+(ggsave plot "out.svg" #:width 800 #:height 600)
+(ggsave plot "out.ps"  #:width 595 #:height 842)
 ```
 
 ## Examples
@@ -256,20 +263,22 @@ The modules below `gg-plot` can be used directly for custom plot pipelines.
 (scale-breaks s 5)   ; list of tick positions
 ```
 
-### Drawing primitives (`gg-primitives`)
+### Drawing primitives (`gg-primitives-vge`)
 
 ```scheme
-(import gg-primitives)
+(import gg-primitives-vge gg-vge gg-backend-cairo)
 
-;; Drawers are values; combine composes them
+;; Drawers are pure values; combine composes them left-to-right
 (define fig
   (combine
-    (rectangle 0 0 800 600 #:fill-color "white")
-    (with-pen-color "steelblue"
-      (circle 400 300 50))
-    (text 400 560 "Hello" #:size 14.0)))
+    (with-fill-color "white" (filled-rect-drawer 0 0 800 600))
+    (with-pen-color "steelblue" (circle-drawer 400 300 50))
+    (text-drawer 400 560 "Hello")))
 
-(render fig (make-png-plotter "fig.png" 800 600))
+;; Render to a file via a Cairo backend
+(let ((vge (make-vge)))
+  (render-drawer fig vge)
+  (vge-render! vge (make-cairo-png-backend "fig.png" 800 600)))
 ```
 
 ## Serialisation
