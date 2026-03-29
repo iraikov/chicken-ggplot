@@ -453,6 +453,58 @@
     (display "Example 11 complete: SVG, PS, and high-res PNG outputs\n")))
 
 ;;; ========================================================================
+;;; Example 12: Dark Theme
+;;; ========================================================================
+
+(define example-12-dark-theme
+  (lambda ()
+    "Demonstrate theme-dark with bright-colored data for contrast"
+
+    (define xs '(0 10 20 30 40 50 60 70 80 90 100))
+
+    (define (sine-wave phase amplitude)
+      (map (lambda (x)
+             (* amplitude (sin (+ (* x 0.063) phase))))
+           xs))
+
+    (define data
+      `((x     . ,xs)
+        (y1    . ,(sine-wave 0.0 2.0))
+        (y2    . ,(sine-wave 1.0 1.5))
+        (upper . ,(map (lambda (v) (+ v 0.4)) (sine-wave 0.0 2.0)))
+        (lower . ,(map (lambda (v) (- v 0.4)) (sine-wave 0.0 2.0)))))
+
+    (define plot
+      (ggplot data (aes #:x 'x #:y 'y1)
+        ;; Confidence band
+        (layer 'area
+               #:mapping (aes #:ymin 'lower #:ymax 'upper)
+               #:fill "steelblue"
+               #:alpha 0.4)
+        ;; Primary series
+        (layer 'line #:color "steelblue" #:width 2)
+        (layer 'point #:color "steelblue" #:size 5)
+        ;; Secondary series
+        (layer 'line
+               #:mapping (aes #:y 'y2)
+               #:color "coral"
+               #:width 2)
+        (layer 'point
+               #:mapping (aes #:y 'y2)
+               #:color "coral"
+               #:size 5)
+        ;; Scales
+        (scale-x-continuous #:name "Time (ms)")
+        (scale-y-continuous #:name "Amplitude")
+        ;; Dark theme
+        (theme-dark #:base-size 12)
+        (labs #:title "Dark Theme Example"
+              #:subtitle "Two sine waves on a dark background")))
+
+    (ggsave plot "ex12-dark-theme.png" #:width 800 #:height 600)
+    (display "Example 12 complete: ex12-dark-theme.png\n")))
+
+;;; ========================================================================
 ;;; Run All Examples
 ;;; ========================================================================
 
@@ -468,6 +520,7 @@
   (example-9-gradient)
   (example-10-complete-analysis)
   (example-11-output-formats)
+  (example-12-dark-theme)
   )
 
 (run-all-examples)

@@ -84,9 +84,13 @@
    facet-grid
    
    ;; Themes
+   theme-gray
    theme-minimal
    theme-classic
    theme-bw
+   theme-linedraw
+   theme-light
+   theme-dark
    theme-void
    
    ;; Labels
@@ -993,6 +997,78 @@
                       (errorbar-cap-width . 0.5)
                       (errorbar-line-width . 1.5)
                       (point-size . 3.0))))
+
+  (define (theme-gray #!key (base-size 12) (base-family "sans"))
+    "Gray theme - the classic ggplot2 default (gray panel, white gridlines)"
+    `(theme (name . gray)
+            (base-size . ,base-size)
+            (base-family . ,base-family)
+            (plot-background . "white")
+            (panel (background . "gray92")
+                   (grid-major . "white")
+                   (grid-minor . "white")
+                   (border . #f))
+            (axis (line . "gray50"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
+            (legend (position . right)
+                    (background . #f))))
+
+  (define (theme-linedraw #!key (base-size 12) (base-family "sans"))
+    "Linedraw theme - white background with black gridlines and border"
+    `(theme (name . linedraw)
+            (base-size . ,base-size)
+            (base-family . ,base-family)
+            (plot-background . "white")
+            (panel (background . "white")
+                   (grid-major . "black")
+                   (grid-minor . "gray60")
+                   (border . "black"))
+            (axis (line . "black"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
+            (legend (position . right)
+                    (background . "white"))))
+
+  (define (theme-light #!key (base-size 12) (base-family "sans"))
+    "Light theme - white background with light gray gridlines and border"
+    `(theme (name . light)
+            (base-size . ,base-size)
+            (base-family . ,base-family)
+            (plot-background . "white")
+            (panel (background . "white")
+                   (grid-major . "gray80")
+                   (grid-minor . "gray92")
+                   (border . "gray80"))
+            (axis (line . "gray50"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
+            (legend (position . right)
+                    (background . #f))))
+
+  (define (theme-dark #!key (base-size 12) (base-family "sans"))
+    "Dark theme - dark gray background with lighter grid (for contrast with bright data)"
+    `(theme (name . dark)
+            (base-size . ,base-size)
+            (base-family . ,base-family)
+            (plot-background . "gray35")
+            (panel (background . "gray35")
+                   (grid-major . "gray50")
+                   (grid-minor . "gray40")
+                   (border . #f))
+            (axis (line . "gray80"))
+            (geometry (bar-width . 0.7)
+                      (errorbar-cap-width . 0.5)
+                      (errorbar-line-width . 1.5)
+                      (point-size . 3.0))
+            (legend (position . right)
+                    (background . #f))))
 
   ;;; ========================================================================
   ;;; Labels
