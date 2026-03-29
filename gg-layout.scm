@@ -58,7 +58,7 @@
           srfi-69
           matchable
           datatype
-          gg-primitives-vge
+          (except gg-primitives-vge make-bbox bbox? bbox-x bbox-y bbox-w bbox-h bbox-union bbox-expand)
           gg-scales)
 
 
