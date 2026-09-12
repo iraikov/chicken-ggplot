@@ -1,0 +1,6 @@
+
+(repo git "git://github.com/iraikov/chicken-ggplot.git")
+(uri targz "https://github.com/iraikov/chicken-ggplot/tarball/{egg-release}")
+
+(release "1.3" )
+
