@@ -9,7 +9,6 @@
         test
         yasos
         srfi-1
-        matchable
         datatype
         gg-primitives-vge
         gg-scales
