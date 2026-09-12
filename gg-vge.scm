@@ -76,10 +76,11 @@
   )
 
   (import scheme
+          (scheme base)
           (chicken base)
           (chicken pretty-print)
           srfi-1
-          datatype 
+          datatype
           gg-backend)   ;; color?, path-cmd?, halign/*, valign/*, backend operations
 
 ;;; ================================================================

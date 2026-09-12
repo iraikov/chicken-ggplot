@@ -362,9 +362,9 @@
         ;; Find domain value for range value
         (let ((result #f))
           (hash-table-walk value-map
-                          (lambda (k v)
-                            (when (equal? v value)
-                              (set! result k))))
+                           (lambda (k v)
+                             (when (equal? v value)
+                               (set! result k))))
           result))
        
        ((scale-breaks self . args)
