@@ -118,27 +118,33 @@
 
    )
 
-  (import scheme
-          (chicken base)
-          (chicken format)
-          (chicken string)
-          (chicken keyword)
-          srfi-1
-          srfi-69
-          statistics
-          matchable
-          yasos
-          yasos-collections
-          gg-vge
-          gg-primitives-vge
-          gg-backend
-          gg-backend-cairo
-          gg-scales
-          gg-data
-          gg-aes
-          gg-geom
-          gg-guides
-          gg-layout)
+   (import scheme
+           (chicken base)
+           (chicken format)
+           (chicken string)
+           (chicken keyword)
+           (chicken pathname)
+           (scheme char)
+           srfi-1
+           srfi-69
+           statistics
+           matchable
+           yasos
+           yasos-collections
+           gg-vge
+           gg-primitives-vge
+           gg-backend
+           gg-backend-pdf
+           gg-scales
+           gg-data
+           gg-aes
+           gg-geom
+           gg-guides
+           gg-layout)
+
+   (cond-expand
+     (cairo (import gg-backend-cairo))
+     (else))
 
   ;;; ========================================================================
   ;;; Data Structures
@@ -2799,29 +2805,71 @@
   ;;; High-Level Save / Display Functions
   ;;; ========================================================================
 
-  (define (ggsave plot filename #!key (width 800) (height 600))
-    "Save a plot to a PNG file via the Cairo backend.
+  ;; Backend selection for raster/vector Cairo formats.  Defined only
+  ;; when the library was compiled with the cairo feature; otherwise a
+  ;; distinct definition below raises a clear, actionable error.
+
+  (cond-expand
+    (cairo
+     (define (make-cairo-backend-for fmt filename width height)
+       (case fmt
+         ((png) (make-cairo-png-backend filename width height))
+         ((svg) (make-cairo-svg-backend filename width height))
+         ((ps)  (make-cairo-ps-backend  filename width height))
+         (else  (error "make-cairo-backend-for: unsupported cairo format" fmt)))))
+    (else
+     (define (make-cairo-backend-for fmt filename width height)
+       (error (conc "ggsave: format " fmt
+                   " requires the cairo backend; rebuild with -feature cairo, or save as .pdf")
+              filename))))
+
+  (define (ggsave plot filename #!key (width 800) (height 600) (format #f))
+    "Save a plot to a file, choosing the backend from the filename
+     extension (or the optional FORMAT keyword: 'pdf 'png 'svg 'ps).
+
+     PDF works in every build and is the default.  PNG, SVG and PS
+     require the Cairo backend (chicken-install -feature cairo).
 
      Arguments:
        plot:     plot specification from ggplot
-       filename: output file path, e.g. \"plot.png\"
+       filename: output file path, e.g. \"plot.pdf\"
        width:    pixel width  (default 800)
        height:   pixel height (default 600)
+       format:   override the format inferred from the extension
 
      Example:
-       (ggsave my-plot \"output.png\" #:width 1000 #:height 600)"
-    (let ((backend (make-cairo-png-backend filename width height)))
+       (ggsave my-plot \"output.pdf\" #:width 1000 #:height 600)"
+    (let* ((fmt (or format
+                   (and (pathname-extension filename)
+                        (string->symbol
+                         (string-downcase (pathname-extension filename))))
+                   'pdf))
+           (backend
+            (case fmt
+              ((pdf) (make-pdf-backend filename width height))
+              ((png svg ps)
+               (make-cairo-backend-for fmt filename width height))
+              (else (error "ggsave: unsupported format" fmt)))))
       (render-plot plot backend)))
 
+  ;; Temp file for ggdisplay: prefer PNG when Cairo is available since
+  ;; image viewers and terminals inline it directly; otherwise write a
+  ;; PDF, which every build can produce.
+  (define ggdisplay-tmpfile
+    (cond-expand
+      (cairo "/tmp/ggplot-display.png")
+      (else   "/tmp/ggplot-display.pdf")))
+
   (define (ggdisplay plot #!key (width 800) (height 600))
-    "Save a plot to a temporary PNG and display it.
+    "Save a plot to a temporary file and display it.
 
      This is a lightweight substitute for an X11-live display.
-     The temporary file is written to /tmp/ggplot-display.png.
+     The temporary file is written to /tmp/ggplot-display.png (PDF
+     when the library was built without the cairo feature).
 
      Example:
        (ggdisplay my-plot #:width 1000 #:height 700)"
-    (let ((tmpfile "/tmp/ggplot-display.png"))
+    (let ((tmpfile ggdisplay-tmpfile))
       (ggsave plot tmpfile #:width width #:height height)
       (display (string-append "Plot written to " tmpfile "\n"))))
   

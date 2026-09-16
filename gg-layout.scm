@@ -58,6 +58,7 @@
           srfi-69
           matchable
           datatype
+          gg-backend
           (except gg-primitives-vge make-bbox bbox? bbox-x bbox-y bbox-w bbox-h bbox-union bbox-expand)
           gg-scales)
 
@@ -85,9 +86,17 @@
 
   (define (rectangle x y w h #!key (fill-color "lightgray") (edge-color "black")
                                (line-width 1) (alpha 1.0))
-    (with-pen-color edge-color
-      (with-fill-color fill-color
-        (filled-rect-drawer x y w h))))
+    ;; Alpha less than 1 scales the fill color's own alpha channel; the
+    ;; pen (outline) color is unaffected.
+    (let* ((fill (if (and (number? alpha) (< alpha 1.0))
+                     (call-with-values
+                       (lambda () (color->rgba-values fill-color))
+                       (lambda (r g b a)
+                         (color:rgba r g b (* a (exact->inexact alpha)))))
+                     fill-color)))
+      (with-pen-color edge-color
+        (with-fill-color fill
+          (filled-rect-drawer x y w h)))))
 
   (define (line x1 y1 x2 y2 #!key (color "black") (width 1))
     (with-pen-color color

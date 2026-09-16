@@ -50,8 +50,8 @@
         (labs #:title "Time Series with Confidence Band"
               #:subtitle "Example of layered composition")))
     
-    (ggsave plot "ex1-timeseries.png" #:width 800 #:height 600)
-    (display "Example 1 complete: ex1-timeseries.png\n")))
+    (ggsave plot "ex1-timeseries.pdf" #:width 800 #:height 600)
+    (display "Example 1 complete: ex1-timeseries.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 2: Multi-Series Line Plot with Color Mapping
@@ -84,8 +84,8 @@
         (labs #:title "Treatment vs Control"
               #:subtitle "Two experimental conditions")))
     
-    (ggsave plot "ex2-multiseries.png" #:width 800 #:height 600)
-    (display "Example 2 complete: ex2-multiseries.png\n")))
+    (ggsave plot "ex2-multiseries.pdf" #:width 800 #:height 600)
+    (display "Example 2 complete: ex2-multiseries.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 3: Bar Chart with Categorical Data
@@ -117,8 +117,8 @@
         (labs #:title "Firing Rates Across Brain Regions"
               #:subtitle "Mean baseline activity")))
     
-    (ggsave plot "ex3-bars.png" #:width 700 #:height 500)
-    (display "Example 3 complete: ex3-bars.png\n")))
+    (ggsave plot "ex3-bars.pdf" #:width 700 #:height 500)
+    (display "Example 3 complete: ex3-bars.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 4: Spike Raster Plot (Neuroscience)
@@ -170,8 +170,8 @@
               #:subtitle "Pre vs Post stimulus"
               #:caption "Red line indicates stimulus onset")))
     
-    (ggsave plot "ex4-raster.png" #:width 800 #:height 600)
-    (display "Example 4 complete: ex4-raster.png\n")))
+    (ggsave plot "ex4-raster.pdf" #:width 800 #:height 600)
+    (display "Example 4 complete: ex4-raster.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 5: Faceted Plot (Small Multiples)
@@ -209,8 +209,8 @@
         (labs #:title "Power Across Frequency Bands"
               #:subtitle "Region V1")))
     
-    (ggsave plot "ex5-faceted.png" #:width 1200 #:height 400)
-    (display "Example 5 complete: ex5-faceted.png\n")))
+    (ggsave plot "ex5-faceted.pdf" #:width 1200 #:height 400)
+    (display "Example 5 complete: ex5-faceted.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 6: Logarithmic Scale
@@ -239,8 +239,8 @@
         (labs #:title "Dose-Response Curve"
               #:subtitle "Log-log plot")))
     
-    (ggsave plot "ex6-logscale.png" #:width 700 #:height 600)
-    (display "Example 6 complete: ex6-logscale.png\n")))
+    (ggsave plot "ex6-logscale.pdf" #:width 700 #:height 600)
+    (display "Example 6 complete: ex6-logscale.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 7: Plot Specification Serialization
@@ -281,8 +281,8 @@
     (define restored-plot (sexp->plot loaded-sexp))
     
     ;; Render restored plot
-    (ggsave restored-plot "ex7-serialized.png" #:width 700 #:height 500)
-    (display "Example 7 complete: ex7-serialized.png\n")
+    (ggsave restored-plot "ex7-serialized.pdf" #:width 700 #:height 500)
+    (display "Example 7 complete: ex7-serialized.pdf\n")
     (display "  Plot specification saved to: plot-spec.scm\n")))
 
 ;;; ========================================================================
@@ -322,8 +322,8 @@
     ;; Generate plot with selected variables
     (define plot (make-comparison-plot '(var1 var2 var3)))
     
-    (ggsave plot "ex8-programmatic.png" #:width 800 #:height 600)
-    (display "Example 8 complete: ex8-programmatic.png\n")))
+    (ggsave plot "ex8-programmatic.pdf" #:width 800 #:height 600)
+    (display "Example 8 complete: ex8-programmatic.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 9: Gradient Color Scale
@@ -359,8 +359,8 @@
         (labs #:title "Gradient Color Mapping"
               #:subtitle "Blue (low) to Red (high)")))
     
-    (ggsave plot "ex9-gradient.png" #:width 600 #:height 600)
-    (display "Example 9 complete: ex9-gradient.png\n")))
+    (ggsave plot "ex9-gradient.pdf" #:width 600 #:height 600)
+    (display "Example 9 complete: ex9-gradient.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 10: Complete Neuroscience Analysis
@@ -417,8 +417,8 @@
               #:subtitle "LFP with spike rate overlay"
               #:caption "Yellow region indicates stimulus period")))
     
-    (ggsave plot "ex10-complete.png" #:width 900 #:height 600)
-    (display "Example 10 complete: ex10-complete.png\n")))
+    (ggsave plot "ex10-complete.pdf" #:width 900 #:height 600)
+    (display "Example 10 complete: ex10-complete.pdf\n")))
 
 ;;; ========================================================================
 ;;; Example 11: Using Different Output Formats
@@ -447,7 +447,7 @@
     ;; PostScript output
     (render-plot plot (make-cairo-ps-backend "ex11-output.ps" 600 400))
 
-    ;; PNG output (high resolution: 4× pixel dimensions)
+    ;; PNG output (high resolution: 4x pixel dimensions)
     (ggsave plot "ex11-output-hires.png" #:width 2400 #:height 1600)
 
     (display "Example 11 complete: SVG, PS, and high-res PNG outputs\n")))
@@ -501,8 +501,8 @@
         (labs #:title "Dark Theme Example"
               #:subtitle "Two sine waves on a dark background")))
 
-    (ggsave plot "ex12-dark-theme.png" #:width 800 #:height 600)
-    (display "Example 12 complete: ex12-dark-theme.png\n")))
+    (ggsave plot "ex12-dark-theme.pdf" #:width 800 #:height 600)
+    (display "Example 12 complete: ex12-dark-theme.pdf\n")))
 
 ;;; ========================================================================
 ;;; Run All Examples

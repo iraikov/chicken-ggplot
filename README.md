@@ -1,6 +1,6 @@
 # ggplot
 
-A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.org/), inspired by [ggplot2](https://ggplot2.tidyverse.org/). Plots are described as composable declarative S-expressions that are translated into vector graphics via the [Cairo graphics library](https://www.cairographics.org/).
+A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.org/), inspired by [ggplot2](https://ggplot2.tidyverse.org/). Plots are described as composable declarative S-expressions that are translated into vector graphics via a native PDF backend, with optional PNG/SVG/PostScript output via the [Cairo graphics library](https://www.cairographics.org/).
 
 ## Features
 
@@ -11,31 +11,38 @@ A Grammar of Graphics plotting library for [CHICKEN Scheme](https://www.call-cc.
 - Statistical transformations: histograms, density estimates, boxplots, violin plots, summary statistics
 - Faceted layouts (small multiples)
 - Annotation layers: text, rectangles, segments, arrows
-- Multiple output backends: PNG, SVG, PostScript, PDF (via Cairo)
+- Native PDF output with no system-library dependencies; PNG, SVG and PostScript via opt-in Cairo
 - Nine composable modules usable independently or together
 
 ## Installation
 
-The library is packaged as a CHICKEN 5 egg. Install with:
+The library is packaged as a CHICKEN egg. Install with:
 
 ```sh
 chicken-install ggplot
+```
+
+The default installation depends only on pure-Scheme eggs and produces PDF output. To also enable PNG, SVG and PostScript (and the Cairo text rendering), build with the cairo feature:
+
+```sh
+chicken-install -feature cairo ggplot
 ```
 
 ### Dependencies
 
 The following eggs must be available:
 
-- [`cairo`](https://wiki.call-cc.org/eggref/5/cairo) - Cairo bindings
-- [`matchable`](https://wiki.call-cc.org/eggref/5/matchable) - pattern matching
-- [`datatype`](https://wiki.call-cc.org/eggref/5/datatype) - algebraic data types
-- [`statistics`](https://wiki.call-cc.org/eggref/5/statistics) - statistical functions
-- [`yasos`](https://wiki.call-cc.org/eggref/5/yasos) - object system (used internally)
+- [`pdf`](https://wiki.call-cc.org/eggref/6/pdf) - PDF generation (bundles `pdf-font` for the base-14 font metrics)
+- [`matchable`](https://wiki.call-cc.org/eggref/6/matchable) - pattern matching
+- [`datatype`](https://wiki.call-cc.org/eggref/6/datatype) - algebraic data types
+- [`statistics`](https://wiki.call-cc.org/eggref/6/statistics) - statistical functions
+- [`yasos`](https://wiki.call-cc.org/eggref/6/yasos) - object system (used internally)
+- [`cairo`](https://wiki.call-cc.org/eggref/6/cairo) - Cairo bindings (only needed when building with `-feature cairo`)
 
 ## Quick Start
 
 ```scheme
-(import gg-plot gg-scales gg-aes gg-backend-cairo)
+(import gg-plot gg-scales gg-aes gg-backend-pdf)
 
 (define data
   '((x . (1 2 3 4 5))
@@ -49,7 +56,7 @@ The following eggs must be available:
            #:x "X" #:y "Y")
     (theme-minimal)))
 
-(ggsave p "plot.png" #:width 800 #:height 600)
+(ggsave p "plot.pdf" #:width 800 #:height 600)
 ```
 
 ## Modules
@@ -61,7 +68,8 @@ or together.
 |---|---|
 | `gg-vge` | Virtual Graphics Engine — algebraic IR for graphics instructions |
 | `gg-backend` | Abstract backend protocol (YASOS interface) |
-| `gg-backend-cairo` | Cairo backend: PNG, SVG, PostScript, PDF output |
+| `gg-backend-pdf` | Native PDF backend: PDF output in every build (base-14 fonts, alpha transparency) |
+| `gg-backend-cairo` | Cairo backend: PNG, SVG, PostScript, PDF output (opt-in, `-feature cairo`) |
 | `gg-primitives-vge` | Low-level composable drawing combinators (drawers) |
 | `gg-scales` | Data-to-visual mappings (domain training, break computation) |
 | `gg-data` | Columnar data frame utilities |
@@ -146,26 +154,49 @@ layer-annotate-segment  layer-annotate-arrow
 
 ### Output backends
 
-All backends are constructed from `gg-backend-cairo`:
+The native PDF backend is always available and is the default for
+`ggsave`:
 
 ```scheme
+(import gg-backend-pdf)
+(make-pdf-backend filename width height
+                  #:pdf-version "1.4"   ; or "1.3" (alpha disabled)
+                  #:compress? #t)       ; FlateDecode the content stream
+```
+
+Width and height are in PDF points (72 per inch; A4 = 595x842).  Text
+uses the 14 standard Type1 fonts (Helvetica, Times, Courier families);
+free-form family strings fall back to Helvetica.  Alpha transparency
+renders through PDF 1.4 ExtGState resources.
+
+When the library is built with `-feature cairo`, the Cairo backends are
+also available:
+
+```scheme
+(import gg-backend-cairo)
 (make-cairo-png-backend filename width height)   ; PNG raster
 (make-cairo-svg-backend filename width height)   ; SVG vector
 (make-cairo-ps-backend  filename width height)   ; PostScript
-(make-cairo-pdf-backend filename width height)   ; PDF (width/height in pt; A4 = 595×842)
+(make-cairo-pdf-backend filename width height)   ; PDF (width/height in pt; A4 = 595x842)
 ```
 
-Render using `render-plot` or the `ggsave` convenience function:
+Render using `render-plot` or the `ggsave` convenience function, which
+chooses the backend from the filename extension:
 
 ```scheme
 ;; Low-level: pass a backend directly
-(render-plot plot (make-cairo-png-backend "out.png" 800 600))
+(render-plot plot (make-pdf-backend "out.pdf" 800 600))
 
-;; Convenience: format inferred from file extension
-(ggsave plot "out.png" #:width 800 #:height 600)
-(ggsave plot "out.svg" #:width 800 #:height 600)
-(ggsave plot "out.ps"  #:width 595 #:height 842)
+;; Convenience: format inferred from file extension (default pdf)
+(ggsave plot "out.pdf" #:width 800 #:height 600)
+(ggsave plot "out.png" #:width 800 #:height 600)  ; requires -feature cairo
+(ggsave plot "out.svg" #:width 800 #:height 600)  ; requires -feature cairo
+(ggsave plot "out.ps"  #:width 595 #:height 842)  ; requires -feature cairo
 ```
+
+A `ggsave` call for a PNG/SVG/PS filename in a build without the cairo
+feature raises a clear, actionable error suggesting either a rebuild
+with `-feature cairo` or saving as `.pdf`.
 
 ## Examples
 
@@ -266,7 +297,7 @@ The modules below `gg-plot` can be used directly for custom plot pipelines.
 ### Drawing primitives (`gg-primitives-vge`)
 
 ```scheme
-(import gg-primitives-vge gg-vge gg-backend-cairo)
+(import gg-primitives-vge gg-vge gg-backend-pdf)
 
 ;; Drawers are pure values; combine composes them left-to-right
 (define fig
@@ -275,10 +306,10 @@ The modules below `gg-plot` can be used directly for custom plot pipelines.
     (with-pen-color "steelblue" (circle-drawer 400 300 50))
     (text-drawer 400 560 "Hello")))
 
-;; Render to a file via a Cairo backend
+;; Render to a file via the PDF backend
 (let ((vge (make-vge)))
   (render-drawer fig vge)
-  (vge-render! vge (make-cairo-png-backend "fig.png" 800 600)))
+  (vge-render! vge (make-pdf-backend "fig.pdf" 800 600)))
 ```
 
 ## Serialisation

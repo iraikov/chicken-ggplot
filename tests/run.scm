@@ -6,6 +6,9 @@
         (chicken base)
         (chicken format)
         (chicken time)
+        (chicken file)
+        (chicken file posix)
+        (chicken io)
         test
         yasos
         srfi-1
@@ -15,7 +18,9 @@
         gg-aes
         gg-geom
         gg-layout
-        gg-plot)
+        gg-plot
+        gg-backend
+        gg-backend-pdf)
 
 ;;; ========================================================================
 ;;; Test Data Fixtures
@@ -386,6 +391,93 @@
                (let ((annot (annotate-text "Test" 0 0)))
                  (and (assq-ref (cddr annot) 'size)
                       (assq-ref (cddr annot) 'color)))))
+
+;;; ========================================================================
+;;; PDF Backend Integration Tests
+;;; ========================================================================
+;;;
+;;; Render example plots through the native PDF backend and check the
+;;; structural properties of the produced files.
+
+;; Count non-overlapping occurrences of a needle in a haystack.
+(define (count-substring needle haystack)
+  (let ((nlen (string-length needle))
+        (hlen (string-length haystack)))
+    (let loop ((i 0) (n 0))
+      (cond ((> (+ i nlen) hlen) n)
+            ((string=? needle (substring haystack i (+ i nlen)))
+             (loop (+ i nlen) (+ n 1)))
+            (else (loop (+ i 1) n))))))
+
+;; Plain substring search; returns #f if not found.
+(define (substring-index needle haystack start)
+  (let ((nlen (string-length needle))
+        (hlen (string-length haystack)))
+    (let loop ((i start))
+      (cond ((> (+ i nlen) hlen) #f)
+            ((string=? needle (substring haystack i (+ i nlen))) i)
+            (else (loop (+ i 1)))))))
+
+(define (string-prefix? prefix str)
+  (and (>= (string-length str) (string-length prefix))
+       (string=? prefix (substring str 0 (string-length prefix)))))
+
+(test-group "pdf-backend-integration"
+
+  (test-assert "example plot renders to a well-formed single-page PDF"
+               (let* ((plot (ggplot neural-spike-data
+                                    (aes #:x 'time #:y 'amplitude)
+                                    (layer 'line
+                                           #:mapping (aes #:x 'time #:y 'amplitude)
+                                           #:params `((color . "steelblue")
+                                                      (width . 1.5)))
+                                    (layer-point)))
+                      (path (create-temporary-file "pdf")))
+                 (render-plot plot (make-pdf-backend path 800 600))
+                 (let* ((contents (call-with-input-file path
+                                    (lambda (p) (read-string #f p))))
+                        (len (string-length contents)))
+                   (delete-file path)
+                   (and (> len 8)
+                        (string=? "%PDF-1.4" (substring contents 0 8))
+                        (= 1 (count-substring "/Type /Page \n" contents))
+                        (substring-index "%%EOF" contents 0)))))
+
+  (test-assert "translucent annotation layer emits an ExtGState alpha resource"
+               (let* ((plot (ggplot neural-spike-data
+                                    (aes #:x 'time #:y 'amplitude)
+                                    (layer-point)
+                                    (layer-annotate-rect 20 0 35 2
+                                                         #:fill "yellow"
+                                                         #:alpha 0.2)))
+                      (path (create-temporary-file "pdf")))
+                 (render-plot plot (make-pdf-backend path 800 600))
+                 (let ((contents (call-with-input-file path
+                                    (lambda (p) (read-string #f p)))))
+                   (delete-file path)
+                   (and (string-prefix? "%PDF-1.4" contents)
+                        (substring-index "/Type /ExtGState" contents 0)
+                        (substring-index "/ca 0.2 " contents 0)))))
+
+  (test-assert "ggsave writes a PDF for a .pdf filename"
+               (let* ((plot (ggplot test-points
+                                    (aes #:x 'x #:y 'y)
+                                    (layer-point)))
+                      (path (create-temporary-file "pdf")))
+                 (ggsave plot path #:width 800 #:height 600)
+                 (let ((contents (call-with-input-file path
+                                    (lambda (p) (read-string #f p)))))
+                   (delete-file path)
+                   (string-prefix? "%PDF-1.4" contents))))
+
+  (test-assert "ggsave rejects an unsupported format with an actionable error"
+               (condition-case
+                 (let ((plot (ggplot test-points
+                                     (aes #:x 'x #:y 'y)
+                                     (layer-point))))
+                   (ggsave plot "/tmp/opencode/plot.jpg")
+                   #f)
+                 (exn () #t))))
 
 ;;; ========================================================================
 ;;; Run All Tests
