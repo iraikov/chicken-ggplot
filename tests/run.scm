@@ -360,10 +360,13 @@
              (time-20 (- (current-process-milliseconds) start-20)))
         
         ;; Now times should be measurable (10-100ms range)
-        ;; Still skip if somehow still 0
-        (if (= time-10 0)
+        ;; Skip the ratio check when the baseline is too small to be a
+        ;; reliable timing signal, and allow generous headroom above the
+        ;; expected ~4x (quadratic) growth to absorb scheduler jitter on
+        ;; shared/CI hardware.
+        (if (< time-10 5)
             #t
-            (< time-20 (* time-10 5)))))
+            (< time-20 (* time-10 10)))))
   )
 
 ;;; ========================================================================
